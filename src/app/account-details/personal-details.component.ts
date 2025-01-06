@@ -19,8 +19,8 @@
 
 import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Component } from '@angular/core';
-import { FormBuilder, FormControl, FormGroup } from '@angular/forms';
-import { MatDialog } from '@angular/material/dialog';
+import { UntypedFormBuilder, UntypedFormControl, UntypedFormGroup } from '@angular/forms';
+import { MatLegacyDialog as MatDialog } from '@angular/material/legacy-dialog';
 import { Subject } from 'rxjs';
 import { RMM } from '../rmm';
 import { map } from 'rxjs/operators';
@@ -41,25 +41,27 @@ interface CountryAndTimezone {
 })
 export class PersonalDetailsComponent {
     hide = true;
-    myControl = new FormControl();
+    myControl = new UntypedFormControl();
     countriesAndTimezones: CountryAndTimezone[] = [];
     timezones: string[];
     detailsForm = this.createForm();
     modal_password_ref;
 
     details: Subject<AccountDetailsInterface> = new Subject();
+    is_alternative_email_validated = true;
 
     selectedCountry: any;
     selectedTimezone: any;
 
     constructor(
-        private fb: FormBuilder,
+        private fb: UntypedFormBuilder,
         private http: HttpClient,
         public dialog: MatDialog,
         public rmm: RMM,
     ) {
         this.details.subscribe((details: AccountDetailsInterface) => {
             this.detailsForm.patchValue(details);
+            this.is_alternative_email_validated = details.email_alternative_status === 0;
         });
 
         this.loadDetails();
@@ -74,7 +76,7 @@ export class PersonalDetailsComponent {
         }
     }
 
-    private createForm(): FormGroup {
+    private createForm(): UntypedFormGroup {
         return this.fb.group({
             first_name: this.fb.control(''),
             last_name: this.fb.control(''),
@@ -158,10 +160,20 @@ export class PersonalDetailsComponent {
             .post('/rest/v1/account/details', updates)
             .pipe(map((res: HttpResponse<any>) => res['result']))
             .subscribe((details) => {
-                this.details.next(details);
+                if(details && details.email_alternative) {
+                    this.details.next(details);
+                    this.rmm.show_error('Account details updated', 'Dismiss');
+                } else {
+                    this.rmm.show_error('Failed to update details', 'Dismiss');
+                }
             });
+    }
 
-        this.rmm.show_error('Account details updated', 'Dismiss');
+    public validate_alt_email() {
+      this.http.post('/rest/v1/account/alt_email_validation', {})
+            .subscribe((res) => {
+                this.rmm.show_error('Validation email resent', 'Dismiss');
+            });;
     }
 
     show_modal_password() {

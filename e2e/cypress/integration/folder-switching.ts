@@ -8,11 +8,12 @@ describe('Switching between folders (and not-folders)', () => {
         cy.get('rmm-folderlist mat-tree-node:contains(Inbox)').should('have.class', 'selectedFolder');
     }
 
-    it('can switch from welcome to inbox', () => {
-        localStorage.setItem('localSearchPromptDisplayed221', 'true');
+  it('can switch from welcome to inbox', () => {
+    localStorage.setItem('221:localSearchPromptDisplayed', JSON.stringify('true'));
+    localStorage.setItem('221:localSearchPromptDisplayed', JSON.stringify('true'));
 
-        // start of on /welcome, like a fresh new user
-        cy.visit('/welcome');
+    // start of on /welcome, like a fresh new user
+    cy.visit('/welcome');
 
         // should be able to switch to inbox...
         goToInbox();

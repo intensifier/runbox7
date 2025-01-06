@@ -20,9 +20,9 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { ReplaySubject} from 'rxjs';
 import { take } from 'rxjs/operators';
-import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
+import { ProfileService } from '../profiles/profile.service';
 import { ContactsService } from '../contacts-app/contacts.service';
-import { AppSettingsService } from '../app-settings';
+import { PreferencesService } from '../common/preferences.service';
 
 @Component({
     selector: 'app-avatar-bar',
@@ -65,15 +65,15 @@ export class AvatarBarComponent implements OnInit {
     ownAddresses: ReplaySubject<Set<string>> = new ReplaySubject(1);
 
     constructor(
-        settingsService: AppSettingsService,
+        preferenceService:  PreferencesService,
         private contactsservice: ContactsService,
-        private rmmapi: RunboxWebmailAPI,
+        private profileService: ProfileService
     ) {
-        settingsService.settingsSubject.subscribe(_ => this.ngOnChanges());
+        preferenceService.preferences.subscribe(_ => this.ngOnChanges());
     }
 
     ngOnInit() {
-        this.rmmapi.getFromAddress().subscribe(
+        this.profileService.validProfiles.subscribe(
             froms => this.ownAddresses.next(new Set(froms.map(f => f.email.toLowerCase()))),
             _err  => this.ownAddresses.next(new Set([])),
         );

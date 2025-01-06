@@ -5,14 +5,17 @@
     style="width: 0px; height: 0px; border: none; position: absolute"
   ></iframe>
   <mat-toolbar *ngIf="mailObj" style="display: flex; overflow-x: auto;">
+    
     <!-- Message preview toolbar -->
-    <div style="flex-grow: 1; overflow: hidden" #toolbarButtonContainer>
-      <button *ngIf="morebuttonindex>0" mat-icon-button matTooltip="Move to folder..." (click)="messageActionsHandler.moveToFolder()">
+    <!-- NOTE: These items need to be replicated in the overflow toolbar further down. The number of items shown is controlled by morebuttonindex and TOOLBAR_BUTTON_WIDTH in the .ts file. -->
+    
+    <div class="messageActionButtonsLeft" #toolbarButtonContainer>
+      <button *ngIf="morebuttonindex>0" mat-icon-button matTooltip="Move message to folder..." (click)="messageActionsHandler.moveToFolder()">
         <mat-icon svgIcon="folder"></mat-icon>
       </button>
       <button *ngIf="morebuttonindex>1"
         mat-icon-button
-        [matTooltip]="folder !== this.messagelistservice.trashFolderName ? 'Move to Trash' : 'Delete permanently'"
+        [matTooltip]="folder !== this.messagelistservice.trashFolderName ? 'Move message to Trash' : 'Delete permanently'"
         (click)="messageActionsHandler.deleteMessage()"
       >
         <mat-icon
@@ -35,10 +38,10 @@
       </button>
       <ng-container *ngIf="morebuttonindex>5">
         <button *ngIf="mailObj.seen_flag===1" mat-icon-button matTooltip="Mark unread" (click)="messageActionsHandler.markSeen(0)">
-        <mat-icon svgIcon="email-open"></mat-icon>
+        <mat-icon svgIcon="email-mark-as-unread"></mat-icon>
         </button>
         <button *ngIf="mailObj.seen_flag===0" mat-icon-button matTooltip="Mark read" (click)="messageActionsHandler.markSeen(1)">
-        <mat-icon svgIcon="email-check"></mat-icon>
+        <mat-icon svgIcon="email-open"></mat-icon>
         </button>
        </ng-container>
       <ng-container *ngIf="morebuttonindex>6">
@@ -60,20 +63,36 @@
           <mat-icon svgIcon="alert-octagon-outline"></mat-icon>
         </button>
       </ng-container>
-      <a *ngIf="morebuttonindex>8" mat-icon-button
+      <button mat-icon-button *ngIf="morebuttonindex>8" matTooltip="Block Sender/Domain" [matMenuTriggerFor]="blockSenderMenu">
+        <mat-icon svgIcon="filter-cog"></mat-icon>
+      </button>
+      <a *ngIf="morebuttonindex>9" mat-icon-button
         matTooltip="View source" [href]="'/rest/v1/email/'+messageId+'/raw'" target="_blank">
         <mat-icon svgIcon="code-tags"></mat-icon>
       </a>
-      <button mat-icon-button *ngIf="mailContentHTML && morebuttonindex>9" matTooltip="HTML settings" [matMenuTriggerFor]="htmlSettingsMenu">
+      <button mat-icon-button *ngIf="mailContentHTML && morebuttonindex>10" matTooltip="HTML settings" [matMenuTriggerFor]="htmlSettingsMenu">
         <mat-icon svgIcon="cog"></mat-icon>
       </button>
-      <a *ngIf="mailContentHTML && morebuttonindex>10" mat-icon-button
+      <a *ngIf="mailContentHTML && morebuttonindex>11" mat-icon-button
         matTooltip="Original HTML" [href]="'/rest/v1/email/'+messageId+'/html'" target="_blank">
         <mat-icon svgIcon="alert"></mat-icon>
       </a>
-      <button mat-icon-button *ngIf="morebuttonindex < 11" [matMenuTriggerFor]="moreMailActionsMenu" matTooltip="More">
+      <button mat-icon-button *ngIf="morebuttonindex < 12" [matMenuTriggerFor]="moreMailActionsMenu" matTooltip="More message actions">
         <mat-icon svgIcon="dots-vertical"></mat-icon>
       </button>
+
+      <mat-menu #blockSenderMenu>
+        <button mat-menu-item (click)="messageActionsHandler.blockSender(mailObj.from[0].address)">
+          Block Sender Email
+        </button>
+        <button mat-menu-item (click)="messageActionsHandler.blockSender(mailObj.from[0].domain)">
+          Block Sender Domain
+        </button>
+        <a mat-menu-item
+           [href]="'/mail/rules'" target="rmm6">
+          Manage Blocking Rules
+        </a>
+      </mat-menu>
 
       <mat-menu #htmlSettingsMenu="matMenu">
           <mat-radio-group
@@ -97,7 +116,8 @@
               </mat-radio-button>
           </mat-radio-group>
       </mat-menu>
-      <!-- Extra dropdown toolbar icons -->
+      
+      <!-- Message preview toolbar overflow items -->
       <mat-menu #moreMailActionsMenu="matMenu">
         <button *ngIf="morebuttonindex<1" mat-menu-item (click)="messageActionsHandler.moveToFolder()">
           <mat-icon svgIcon="folder"></mat-icon>
@@ -149,6 +169,10 @@
             <span>Not spam</span>
           </button>
         </ng-container>
+        <button mat-menu-item *ngIf="morebuttonindex<9" [matMenuTriggerFor]="blockSenderMenu">
+          <mat-icon svgIcon="block"></mat-icon>
+          <span>Block Sender/Domain</span>
+        </button>
         <a *ngIf="morebuttonindex<9" mat-menu-item
           [href]="'/rest/v1/email/'+messageId+'/raw'" target="_blank">
           <mat-icon svgIcon="code-tags"></mat-icon>
@@ -166,28 +190,29 @@
       </mat-menu>
     </div>
 
-    <button mat-icon-button matTooltip="Print message (Please consider the environment before printing this email)" (click)="print()" id="buttonPrint">
-      <mat-icon svgIcon="printer"></mat-icon>
-    </button>
-    <button mat-icon-button matTooltip="Horizontal preview" *ngIf="!adjustableHeight"
-      (click)="changeOrientation('horizontal')">
-      <mat-icon svgIcon="view-split-horizontal"></mat-icon>
-    </button>
-    <button mat-icon-button matTooltip="Vertical preview" *ngIf="adjustableHeight && showVerticalSplitButton"
-      (click)="changeOrientation('vertical')">
-      <mat-icon svgIcon="view-split-vertical"></mat-icon>
-    </button>
-    <button mat-icon-button *ngIf="adjustableHeight && resizer?.isFullHeight===false" (click)="resizer.resizePercentage(100)" matTooltip="Full height">
-      <mat-icon class="messageHeightIcon" svgIcon="arrow-up-drop-circle"></mat-icon>
-    </button>
-    <button mat-icon-button *ngIf="adjustableHeight && resizer?.isFullHeight===true" (click)="resizer.resizePercentage(50)" matTooltip="Half height">
-      <mat-icon class="messageHeightIcon" svgIcon="arrow-down-drop-circle"></mat-icon>
-    </button>
-
-    <button mat-icon-button (click)="close()" matTooltip="Close">
-      <mat-icon svgIcon="close"></mat-icon>
-    </button>
-
+    <div class="messageActionButtonsRight">
+      <button mat-icon-button matTooltip="Print message (Please consider the environment before printing this email)" (click)="print()" id="buttonPrint">
+	<mat-icon svgIcon="printer"></mat-icon>
+      </button>
+      <button mat-icon-button matTooltip="Horizontal preview" *ngIf="!adjustableHeight"
+	      (click)="changeOrientation('horizontal')">
+	<mat-icon svgIcon="view-split-horizontal"></mat-icon>
+      </button>
+      <button mat-icon-button matTooltip="Vertical preview" *ngIf="adjustableHeight && showVerticalSplitButton"
+	      (click)="changeOrientation('vertical')">
+	<mat-icon svgIcon="view-split-vertical"></mat-icon>
+      </button>
+      <button mat-icon-button *ngIf="adjustableHeight && resizer?.isFullHeight===false" (click)="resizer.resizePercentage(100)" matTooltip="Full height">
+	<mat-icon class="messageHeightIcon" svgIcon="arrow-up-drop-circle"></mat-icon>
+      </button>
+      <button mat-icon-button *ngIf="adjustableHeight && resizer?.isFullHeight===true" (click)="resizer.resizePercentage(50)" matTooltip="Half height">
+	<mat-icon class="messageHeightIcon" svgIcon="arrow-down-drop-circle"></mat-icon>
+      </button>
+      
+      <button mat-icon-button (click)="close()" matTooltip="Close">
+	<mat-icon svgIcon="close"></mat-icon>
+      </button>
+    </div>
   </mat-toolbar>
   <div *ngIf="mailObj" #messageContents id="messageContents">
     <mat-expansion-panel [expanded]="mobileQuery.matches ? false : true" id="messageHeader">
@@ -258,7 +283,7 @@
         <mat-list>
           <mat-list-item class="link-pointer" *ngFor="let att of mailObj.attachments; let i=index" (click)="openAttachment(att)">
             <ng-container *ngIf="!att.internal || !(mailContentHTML && showHTML && SUPPORTS_IFRAME_SANDBOX)">
-              <mat-icon mat-list-icon svgIcon="{{attachmentIconFromContentType(att.contentType)}}"></mat-icon> <span>{{att.filename}}</span>
+              <mat-icon mat-list-icon svgIcon="{{attachmentIconFromContentType(att.contentType)}}"></mat-icon> <span>{{att.filename}}</span><span style="flex-grow: 1"></span><span>{{att.sizeDisplay}}</span>
             </ng-container>
           </mat-list-item>
         </mat-list>
@@ -266,29 +291,7 @@
     </mat-expansion-panel>
     <mat-divider></mat-divider>
 
-    <!-- Used when forwarding mail - do not delete -->
-
-    <span style="display: none" #forwardMessageHeader>
-      From: {{mailObj.from[0].name}} &lt;{{mailObj.from[0].address}}&gt; <br />
-      Time: {{mailObj.date | date:'yyyy-MM-dd HH:mm'}} <br />
-      Subject: {{mailObj.subject}} <br />
-      <span *ngIf="mailObj.to">
-        To: <span *ngFor="let to of mailObj.to">{{to.name}} &lt;{{to.address}}&gt;</span>
-      </span> <br />
-      <span *ngIf="mailObj.cc">
-        Cc: <span *ngFor="let to of mailObj.cc">{{to.name}} &lt;{{to.address}}&gt;</span>
-      </span> <br />
-    </span>
-
-    <!-- Used when replying to mail - do not delete -->
-
-    <span style="display: none" #replyMessageHeader>
-      On {{mailObj.date | date:'yyyy-MM-dd HH:mm'}}, {{mailObj.from[0].name}} &lt;{{mailObj.from[0].address}}&gt; wrote:
-    </span>
-
     <div class="htmlButtons" *ngIf="mailContentHTML">
-      <span style="flex-grow: 1"></span>
-      <span>
 	Show:
         <mat-radio-group
           aria-label="Toggle Plain/HTML view"
@@ -297,46 +300,49 @@
           <mat-radio-button
             (click)="toggleHtml($event)"
             value="Plain"
-            matTooltip="Toggle Plain Text view"
+            matTooltip="Toggle Plain Text version of message"
             >
-            Text
+            <mat-icon svgIcon="format-letter-case"></mat-icon>
           </mat-radio-button>
           <mat-radio-button
             (click)="toggleHtml($event)"
             value="HTML"
-            matTooltip="Toggle HTML view"
+            matTooltip="Toggle HTML version of message"
             >
-            HTML
+            <mat-icon svgIcon="format-float-left"></mat-icon>
           </mat-radio-button>
         </mat-radio-group>
-	    <mat-checkbox *ngIf="showHTML"
-            (click)="showExternalImages($event)"
-            [checked]="showImages"
-            matTooltip="Show external images"
-		    >
-	    </mat-checkbox>
+	<mat-checkbox *ngIf="showHTML"
+          (click)="showExternalImages($event)"
+          [checked]="showImages"
+          matTooltip="Show external images"
+	  >
+          <mat-icon svgIcon="image"></mat-icon>
+	</mat-checkbox>
         <mat-checkbox *ngIf="!showHTML"
           color="gray"
-          matTooltip="Show external images (in HTML view)"
+          matTooltip="Show external images (only in HTML view)"
           >
+          <mat-icon svgIcon="image" class="themePaletteDarkGray"></mat-icon>
         </mat-checkbox>
-        <span> Images for </span>
-        <button
-          [ngClass]="savedAlways ? 'mat-flat-button' : 'mat-raised-button'"
-          (click)="saveDecisionGlobal($event)"
-          matTooltip="Save setting for all senders"
-          >
-          All senders
-        </button>
+	<span class="space"></span>
+        <span> For: </span>
         <button
           [ngClass]="savedForThisSender ? 'mat-flat-button' : 'mat-raised-button'"
           (click)="saveDecisionForThisSender($event)"
           matTooltip="Save setting for this sender"
           >
-          This sender
+	  <mat-icon svgIcon="account"></mat-icon>
         </button>
+        <button
+          [ngClass]="savedAlways ? 'mat-flat-button' : 'mat-raised-button'"
+          (click)="saveDecisionGlobal($event)"
+          matTooltip="Save setting for all senders"
+          >
+	  <mat-icon svgIcon="earth"></mat-icon>
+        </button>
+	<span class="space"></span>
         <mat-icon color="warn" svgIcon="alert" matTooltip="Only show HTML messages from trusted senders"></mat-icon>
-      </span>
     </div>
 
     <!-- We have an HTML message -->
@@ -352,17 +358,17 @@
     </div>
 
     <!-- We have an HTML message, but no text version and the user has not chosen to show HTML -->
-    <div *ngIf="mailContentHTML && !showHTML && mailObj.text === 'undefined'" class="notificationContainer">
-      <span class="inMessageNotification">No text version of this message is available. Please click the HTML button to view the HTML version.</span>
+    <div *ngIf="mailContentHTML && !showHTML && (mailObj.text === 'undefined' || mailObj.text.changingThisBreaksApplicationSecurity == '')" class="notificationContainer">
+      <span class="inMessageNotification">No text version of this message is available.<br />Please click the HTML button above to view the HTML version.</span>
     </div>
 
     <!-- We have an empty message -->
-    <div *ngIf="!mailContentHTML && !showHTML && mailObj.text === 'undefined'" class="notificationContainer" id="messageContent">
+    <div *ngIf="!mailContentHTML && !showHTML && mailObj.text === 'undefined'" class="notificationContainer" id="messageContentsBody">
       <span class="inMessageNotification">This message has no content.</span>
     </div>
 
     <!-- We have a plain text message or the user has chosen to show text -->
-    <div *ngIf="!showHTML && mailObj.text !== 'undefined'" id="messageContent" style="white-space: pre-wrap" [innerHTML]='mailObj.text'>
+    <div *ngIf="!showHTML && mailObj.text !== 'undefined'" id="messageContentsBody" style="white-space: pre-wrap" [innerHTML]='mailObj.text'>
     </div>
 
     <div *ngIf="mailContentHTML && showHTML && SUPPORTS_IFRAME_SANDBOX" class="iframe-container">
@@ -383,6 +389,9 @@
             *ngFor="let att of mailObj.attachments; let i=index"
             (click)="openAttachment(att)"
             style="max-width: 150px">
+            <mat-grid-tile-header>
+              <span class="string-ellipsis">{{att.sizeDisplay}}</span>
+            </mat-grid-tile-header>
               <ng-container *ngIf="!att.internal || !(mailContentHTML && showHTML && SUPPORTS_IFRAME_SANDBOX)">
                 <ng-container *ngIf="att.thumbnailURL; else attachment_icon">
                   <img  matListAvatar

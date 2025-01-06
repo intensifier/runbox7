@@ -18,14 +18,15 @@
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, OnInit } from '@angular/core';
-import { MatDialogRef } from '@angular/material/dialog';
-import { RunboxWebmailAPI, FolderListEntry } from '../rmmapi/rbwebmail';
+import { MatLegacyDialogRef as MatDialogRef } from '@angular/material/legacy-dialog';
+import { FolderListEntry } from '../common/folderlistentry';
+import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
 
 @Component({
     template: `
         <mat-spinner *ngIf="moving"></mat-spinner>
         <mat-dialog-content  *ngIf="!moving">
-            <mat-nav-list dense>
+            <mat-nav-list dense id="moveMessagesToFolderList">
                 <mat-list-item *ngFor="let fce of folderListEntries" (click)="moveMessages(fce.folderId)"
                     [style.paddingLeft.px]="fce.folderLevel*10"
                 >

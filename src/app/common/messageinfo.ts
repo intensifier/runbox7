@@ -17,7 +17,7 @@
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
 
-import { XapianAPI } from 'runbox-searchindex/rmmxapianapi';
+import { XapianAPI } from '@runboxcom/runbox-searchindex/rmmxapianapi';
 import { MailAddressInfo } from './mailaddressinfo';
 
 export class MessageInfo {
@@ -75,36 +75,12 @@ export class IndexingTools {
 
         for (let i = 0; i < str.length; i++) {
             const char = str.charCodeAt(i);
-            // tslint:disable-next-line:no-bitwise
+            // eslint-disable-next-line no-bitwise
             hash = ((hash << 5) - hash) + char;
-            // tslint:disable-next-line:no-bitwise
+            // eslint-disable-next-line no-bitwise
             hash = hash & hash; // Convert to 32bit integer
         }
         return hash;
-    }
-
-    public markMessageSeen(messageId: number, seenFlag: boolean) {
-        try {
-            if (seenFlag === true) {
-                this.indexAPI.addTermToDocument(`Q${messageId}`, 'XFseen');
-            } else if (seenFlag === false) {
-                this.indexAPI.removeTermFromDocument(`Q${messageId}`, 'XFseen');
-            }
-        } catch (e) {
-            console.error(e);
-        }
-    }
-
-    public flagMessage(messageId: number, flag: boolean) {
-        try {
-            if (flag === true) {
-                this.indexAPI.addTermToDocument(`Q${messageId}`, 'XFflagged');
-            } else if (flag === false) {
-                this.indexAPI.removeTermFromDocument(`Q${messageId}`, 'XFflagged');
-            }
-        } catch (e) {
-            console.error(e);
-        }
     }
 
     public addMessageToIndex(msginfo: MessageInfo,

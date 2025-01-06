@@ -1,8 +1,12 @@
 /// <reference types="cypress" />
 
 describe('Composing emails', () => {
-    beforeEach(() => {
-        localStorage.setItem('localSearchPromptDisplayed221', 'true');
+  beforeEach(async () => {
+      localStorage.setItem('221:localSearchPromptDisplayed', JSON.stringify('true'));
+
+    (await indexedDB.databases())
+      .filter(db => db.name && /messageCache/.test(db.name))
+      .forEach(db => indexedDB.deleteDatabase(db.name!));
     });
 
     Cypress.config('requestTimeout', 100000);
@@ -54,16 +58,15 @@ describe('Composing emails', () => {
     });
 
     it('should open reply draft with HTML editor', () => {
-        indexedDB.deleteDatabase('messageCache');
         // cy.visit('/');
         // cy.wait(1000);
         cy.intercept('/rest/v1/email/1').as('message1requested');
         cy.visit('/#Inbox:1');
         cy.wait('@message1requested', {'timeout':100000});
         cy.get('single-mail-viewer').should('exist');
-        cy.get('mat-radio-button[mattooltip="Toggle HTML view"]').click();
+        cy.get('mat-radio-button[mattooltip="Toggle HTML version of message"]').click();
         cy.contains('Manually toggle HTML').click();
-        cy.get('mat-radio-button[mattooltip="Toggle HTML view"] input').should('be.checked');
+        cy.get('mat-radio-button[mattooltip="Toggle HTML version of message"] input').should('be.checked');
         // cy.intercept('/mail/download_xapian_index?listallmessages=1&page=0&sinceid=0&sincechangeddate=0&pagesize=100&skipcontent=1&folder=Drafts&avoidcacheuniqueparam=*').as('listAllmessages');
                    // /mail/download_xapian_index?listallmessages=1&page=0&sinceid=0&sincechangeddate=0&pagesize=100&skipcontent=1&folder=Drafts&avoidcacheuniqueparam=1654682375451
         cy.get('button[mattooltip="Reply"]').click();
@@ -92,7 +95,7 @@ describe('Composing emails', () => {
         cy.visit('/compose');
         cy.wait('@listAllmessages', {'timeout':10000});
         cy.visit('/compose?new=true');
-        
+
         cy.get('button[mattooltip="Close draft"').click();
         cy.location().should((loc) => {
             expect(loc.pathname).to.eq('/compose');
@@ -116,7 +119,7 @@ describe('Composing emails', () => {
 
     it('Send email on contacts page, composes an email', () => {
         cy.visit('/contacts');
-        cy.contains('Welcome to Runbox 7 Contacts');
+        cy.contains('Runbox 7 Contacts');
         cy.contains('Patrick Postcode').click();
         cy.contains('Send an email to this address').click();
         cy.location().should((loc) => {
@@ -128,7 +131,7 @@ describe('Composing emails', () => {
 
     it('closing a new email from contacts list, should return to contacts', () => {
         cy.visit('/contacts');
-        cy.contains('Welcome to Runbox 7 Contacts');
+        cy.contains('Runbox 7 Contacts');
         cy.contains('Patrick Postcode').click();
         cy.contains('Send an email to this address').click();
         // NB if we skip checking exist, we get an issue clicking the button
@@ -138,7 +141,7 @@ describe('Composing emails', () => {
         cy.location().should((loc) => {
             expect(loc.pathname).to.eq('/contacts/id-mr-postcode');
             expect(loc.search).to.eq('');
-        }); 
+        });
     });
 
     it('should find the same address in original "To" and our "From" field in Reply', () => {
@@ -149,4 +152,16 @@ describe('Composing emails', () => {
         cy.get('button[mattooltip="Reply"]').click();
         cy.get('.mat-select-value-text span').contains(address, { matchCase: false });
     });
+
+    it('should show a save template button and save on click', () => {
+        cy.visit('/compose?new=true');
+        cy.get('input[data-placeholder="Subject"]').type('Template subject here');
+        cy.get('button[mattooltip="Save as template"').click();
+        cy.location().should((loc) => {
+            expect(loc.pathname).to.eq('/compose');
+            expect(loc.search).to.eq('?new=true');
+        });
+
+        cy.get('snack-bar-container').should('contain', 'Saved to templates');
+    })
 });

@@ -1,7 +1,7 @@
 mat-expansion-panel-header {
     box-shadow: none !important;
-    height: 40px !important;
-    padding-left: 8px !important;
+    height: 30px !important;
+    padding-left: 10px !important;
     padding-right: 24px !important;
 }
 
@@ -11,9 +11,15 @@ mat-expansion-panel {
 
 mat-expansion-panel-header mat-icon {
     padding-left: 10px;
-    padding-right: 13px;
+    padding-right: 4px;
 }
 
 mat-expansion-panel-header .headerText {
     padding: 5px;
+    font-size: 13px;
+    line-height: 20px;
+}
+
+.mat-list-base[dense] .mat-list-item {
+    height: 24px;
 }

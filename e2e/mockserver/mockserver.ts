@@ -1,18 +1,18 @@
 // --------- BEGIN RUNBOX LICENSE ---------
 // Copyright (C) 2016-2018 Runbox Solutions AS (runbox.com).
-// 
+//
 // This file is part of Runbox 7.
-// 
+//
 // Runbox 7 is free software: You can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// 
+//
 // Runbox 7 is distributed in the hope that it will be useful, but
 // WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
@@ -105,6 +105,22 @@ export class MockServer {
             'subfolders': [],
             'type': 'trash'
         },
+	{
+	    'id': '2',
+	    'total': 1,
+	    'size': '344',
+	    'name': 'Templates',
+	    'new': 0,
+	    'folder': 'Templates',
+	    'type': 'templates',
+	    'old': 296,
+	    'msg_total': 1,
+	    'priority': '4',
+	    'subfolders': [],
+	    'msg_new': 0,
+	    'msg_size': '344',
+	    'parent': null
+	},
     ];
 
     vtimezone_oslo =
@@ -311,6 +327,9 @@ END:VCALENDAR
                         }
                         }, 1000);
                     break;
+                case '/rest/v1/aliases/limits':
+                    response.end(JSON.stringify({ "total": 10, "current": 4}));
+                    break;
                 case '/rest/v1/profiles':
                     response.end(JSON.stringify(this.profiles_verified()));
                     break;
@@ -334,6 +353,9 @@ END:VCALENDAR
                     break;
                 case '/rest/v1/account_product/payment_methods':
                     response.end(JSON.stringify(this.payment_methods()));
+                break;
+                case '/rest/v1/account/usage':
+                    response.end(JSON.stringify(this.usageDetails()));
                     break;
                 case '/rest/v1/calendar/calendars':
                     response.end(JSON.stringify(this.getCalendars()));
@@ -342,12 +364,6 @@ END:VCALENDAR
                 case '/rest/v1/calendar/events_raw':
                     this.handleEvents(request, response);
                     break;
-                case '/ajax/from_address':
-                    response.end(JSON.stringify(this.from_address()));
-                    break;
-                case '/ajax/aliases':
-                    response.end(JSON.stringify({ 'status': 'success', 'aliases': [] }));
-                    break;
                 case '/rest/v1/email_folder/create':
                     this.createFolder(request, response);
                     break;
@@ -355,7 +371,7 @@ END:VCALENDAR
                     response.end(JSON.stringify(this.emailFoldersListResponse()));
                     break;
                 case '/mail/download_xapian_index':
-                    response.end('');
+                    response.end(this.templatescontents());
                     break;
                 case '/mail/download_xapian_index?inbox':
                     response.end(this.inboxcontents());
@@ -378,6 +394,18 @@ END:VCALENDAR
                         }
                     ));
                     break;
+                case '/rest/v1/webmail/preferences':
+                    response.end(JSON.stringify({
+                        'Global': {'version': 1, 'entries': {} },
+                        'Desktop': {'version': 1, 'entries': {} },
+                        'Mobile': {'version': 1, 'entries': {} }
+                    }));
+                    break;
+                case '/rest/v1/webmail/saved_searches':
+                    response.end(JSON.stringify({
+                        'version': 1, 'entries': []
+                    }));
+                    break;
                 case '/_ics/Europe/Oslo.ics':
                     response.end(this.vtimezone_oslo);
                     break;
@@ -399,6 +427,15 @@ END:VCALENDAR
                 `Test2<test2@lalala.no>	Re: nonsense	709	n	 `);
         }
         return trashlines.join('\n');
+    }
+
+    templatescontents() {
+        const lines = [];
+        for (let msg_id = 1000; msg_id < 10000; msg_id++) {
+            lines.push(`${msg_id}	1548071429	1547830043	Templates	1	0	0	"Template" <template@runbox.com>	` +
+                `Template2<template@example.org>	TEMPLATE	709	n	 `);
+        }
+        return lines.join('\n');
     }
 
     inboxcontents() {
@@ -463,7 +500,13 @@ END:VCALENDAR
                     "name":         "register .INC 10 year(s)",
                     "pid":          3456,
                     "active":       true,
-                    "quantity":     1
+                    "quantity":     1,
+                    "quotas": {
+                        "VirtualDomain": {
+                            "type": "upgrade",
+                            "quota": 1
+                        }
+                    }
                 }
             ],
         };
@@ -487,8 +530,77 @@ END:VCALENDAR
                         'subtype':     'test',
                         'price':       '13.37',
                         'currency':    'EUR',
-                        'pid':         '9001',
-                        'description': 'Test subscription including some stuff'
+                        'pid':         '1006',
+                        'description': 'Test subscription including some stuff',
+                        "quotas": {
+                            "Alias": {
+                                "quota": 100,
+                                "type": "fixed"
+                            },
+                            "File": {
+                                "type": "fixed",
+                                "quota": 2147483648
+                            },
+                            "Traffic": {
+                                "quota": 10737418240,
+                                "type": "fixed"
+                            },
+                            "VirtualDomain": {
+                                "quota": 10,
+                                "type": "fixed"
+                            },
+                            "Disk": {
+                                "type": "fixed",
+                                "quota": 26843545600
+                            },
+                            "Msg": {
+                                "quota": 5000,
+                                "type": "fixed"
+                            },
+                            "Sent": {
+                                "type": "fixed",
+                                "quota": 500
+                            }
+                        },
+                    },
+                    {
+                        'name':        'Runbox Test 3-year',
+                        'type':        'subscription',
+                        'subtype':     'test',
+                        'price':       '13.37',
+                        'currency':    'EUR',
+                        'pid':         '10006',
+                        'description': 'Test subscription including some stuff',
+                        "quotas": {
+                            "Alias": {
+                                "quota": 100,
+                                "type": "fixed"
+                            },
+                            "File": {
+                                "type": "fixed",
+                                "quota": 2147483648
+                            },
+                            "Traffic": {
+                                "quota": 10737418240,
+                                "type": "fixed"
+                            },
+                            "VirtualDomain": {
+                                "quota": 10,
+                                "type": "fixed"
+                            },
+                            "Disk": {
+                                "type": "fixed",
+                                "quota": 26843545600
+                            },
+                            "Msg": {
+                                "quota": 5000,
+                                "type": "fixed"
+                            },
+                            "Sent": {
+                                "type": "fixed",
+                                "quota": 500
+                            }
+                        },
                     },
                     {
                         'name':        'Runbox Addon',
@@ -497,10 +609,115 @@ END:VCALENDAR
                         'price':       '5.55',
                         'currency':    'EUR',
                         'pid':         '9002',
-                        'description': 'More cool stuff for your account'
+                        'description': 'More cool stuff for your account',
+                        "quotas": {
+                            "VirtualDomain": {
+                                "type": "upgrade",
+                                "quota": 1
+                            }
+                        },
                     }
                 ]
             }
+        };
+    }
+
+    usageDetails() {
+        return {
+            'status': 'success',
+            "result": {
+                "File": {
+                    "name": "File Storage",
+                    "usage": 3020561,
+                    "percentage_used": 0.140655832365155,
+                    "quota": 2147483648,
+                    "type": "bytes"
+                },
+                "Subaccount": {
+                    "usage": 12,
+                    "name": "Medium Subaccounts",
+                    "type": "absolute",
+                    "percentage_used": 9.67741935483871,
+                    "quota": 124
+                },
+                "Disk": {
+                    "percentage_used": 3.30549178716655,
+                    "quota": 27917287424,
+                    "type": "bytes",
+                    "usage": 922803643,
+                    "name": "Mail Storage"
+                },
+                "MicroSubaccount": {
+                    "quota": 0,
+                    "percentage_used": 0,
+                    "type": "absolute",
+                    "usage": 0,
+                    "name": "Micro Subaccounts"
+                },
+                "MaxSubaccount": {
+                    "type": "absolute",
+                    "quota": 0,
+                    "percentage_used": 0,
+                    "usage": 0,
+                    "name": "Max Subaccounts"
+                },
+                "MiniSubaccount": {
+                    "percentage_used": 11.0,
+                    "quota": 100,
+                    "type": "absolute",
+                    "name": "Mini Subaccounts",
+                    "usage": 11
+                },
+                "HostedDomain": {
+                    "quota": 0,
+                    "percentage_used": 0,
+                    "type": "absolute",
+                    "name": "Hosted Domains",
+                    "usage": 0
+                },
+                "Sent": {
+                    "name": "Sent Email",
+                    "usage": 0,
+                    "quota": 500,
+                    "percentage_used": 0,
+                    "type": "absolute"
+                },
+                "VirtualDomain": {
+                    "usage": 5,
+                    "name": "Domain Names",
+                    "type": "absolute",
+                    "percentage_used": 41.6666666666667,
+                    "quota": 12
+                },
+                "Max250Subaccount": {
+                    "quota": 0,
+                    "percentage_used": 0,
+                    "type": "absolute",
+                    "usage": 0,
+                    "name": "Max250 Subaccounts"
+                },
+                "Max100Subaccount": {
+                    "percentage_used": 0,
+                    "quota": 0,
+                    "type": "absolute",
+                    "name": "Max100 Subaccounts",
+                    "usage": 0
+                },
+                "Msg": {
+                    "name": "Received Email",
+                    "usage": 3,
+                    "percentage_used": 0.06,
+                    "quota": 5000,
+                    "type": "absolute"
+                },
+                "Alias": {
+                    "type": "absolute",
+                    "quota": 100,
+                    "percentage_used": 13.0,
+                    "name": "Aliases",
+                    "usage": 13
+                }
+            },
         };
     }
 
@@ -652,34 +869,32 @@ END:VCALENDAR
 
     profiles_verified() {
         return {
-                'result': {
-                    'aliases': [{
-                        'profile': {
-                            'smtp_username': null,
-                            'email': 'a2@example.com',
-                            'reference_type': 'aliases',
-                            'id': 16455,
-                            'smtp_port': null,
-                            'smtp_address': null,
-                            'is_smtp_enabled': 0,
-                            'signature': null,
-                            'reference': {},
-                            'reply_to': 'a2@example.com',
-                            'name': 'a2@example.com',
-                            'smtp_password': null,
-                            'from_name': 'Hallucinogen',
-                            'type': 'aliases'
-                        }
-                    }, {
-                        'profile': {
-                            'id': 16456,
-                            'email': 'aa1@example.com',
-                            'reference_type': 'aliases',
-                            'smtp_username': null,
-                            'from_name': 'Astrix',
-                            'smtp_password': null,
-                            'type': 'aliases',
-                            'reference': {
+                'results':
+                    [{
+                        'smtp_username': null,
+                        'email': 'a2@example.com',
+                        'reference_type': 'aliases',
+                        'id': 16455,
+                        'smtp_port': null,
+                        'smtp_address': null,
+                        'is_smtp_enabled': 0,
+                        'signature': null,
+                        'reference': {},
+                        'reply_to': 'a2@example.com',
+                        'name': 'a2@example.com',
+                        'smtp_password': null,
+                        'from_name': 'Hallucinogen',
+                        'type': 'main'
+                    },
+                    {
+                        'id': 16456,
+                        'email': 'aa1@example.com',
+                        'reference_type': 'aliases',
+                        'smtp_username': null,
+                        'from_name': 'Astrix',
+                        'smtp_password': null,
+                        'type': 'aliases',
+                        'reference': {
                             'domainid': null,
                             'id': 278,
                             'localpart': 'aa1',
@@ -689,92 +904,87 @@ END:VCALENDAR
                                 'status': 6,
                                 'id': 16,
                                 'name': 'example.com'
-                            }
-                        }
-                    }
-                    }, {
-                        'profile': {
-                            'smtp_username': null,
-                            'email': 'testmail@testmail.com',
-                            'reference_type': 'aliases',
-                            'id': 16457,
-                            'smtp_port': null,
-                            'smtp_address': null,
-                            'is_smtp_enabled': 0,
-                            'signature': null,
-                            'reference': {},
-                            'name': 'John Doe',
-                            'smtp_password': null,
-                            'from_name': 'John Doe',
-                            'type': 'aliases'
-                        }
-                    }],
-                    'others': [{
-                        'profile': {
-                            'smtp_password': null,
-                            'from_name': 'Electric Universe',
-                            'type': 'external_email',
-                            'name': 'Electric Universe',
-                            'reference': {
-                                'save_sent': 'n',
-                                'signature': 'xxx',
-                                'use_sig_for_reply': 'NO',
-                                'reply_to': 'admin@runbox.com',
-                                'name': 'Electric Universe',
-                                'default_bcc': '',
-                                'email': 'admin@runbox.com',
-                                'msg_per_page': 0,
-                                'folder': 'Encoding Test',
-                                'sig_above': 'NO',
-                                'charset': null,
-                                'comp_new_window': null,
-                                'status': 0
                             },
-                            'reply_to': 'admin@runbox.com',
-                            'smtp_address': null,
-                            'is_smtp_enabled': 0,
-                            'signature': 'xxx',
-                            'smtp_port': null,
-                            'id': 16448,
-                            'email': 'admin@runbox.com',
-                            'reference_type': 'preference',
-                            'smtp_username': null
-                        }
-                        }, {
-                            'profile': {
-                                'smtp_address': null,
-                                'signature': '<p>ą</p>\r\n<p>eex</p>',
-                                'is_smtp_enabled': 0,
-                                'smtp_port': null,
-                                'from_name': 'folder1',
-                                'smtp_password': null,
-                                'type': 'external_email',
-                                'reply_to': 'admin@runbox.com',
-                                'reference': {
-                                    'comp_new_window': null,
-                                    'status': 0,
-                                    'charset': null,
-                                    'folder': 'LALA',
-                                    'sig_above': 'NO',
-                                    'email': 'admin@runbox.com',
-                                    'msg_per_page': 0,
-                                    'name': 'folder1',
-                                    'reply_to': 'admin@runbox.com',
-                                    'default_bcc': '',
-                                    'use_sig_for_reply': 'YES',
-                                    'signature': '<p>ą</p>\r\n<p>eex</p>',
-                                    'save_sent': 'n'
-                                },
-                                'name': 'folder1',
-                                'email': 'admin@runbox.com',
-                                'reference_type': 'preference',
-                                'smtp_username': null,
-                                'id': 16450
-                            }
-                        }],
-                        'main': []
-                }
-            };
+                        },
+                    },
+                     {
+                        'smtp_username': null,
+                        'email': 'testmail@testmail.com',
+                        'reference_type': 'aliases',
+                        'id': 16457,
+                        'smtp_port': null,
+                        'smtp_address': null,
+                        'is_smtp_enabled': 0,
+                        'signature': null,
+                        'reference': {},
+                        'name': 'John Doe',
+                        'smtp_password': null,
+                        'from_name': 'John Doe',
+                        'type': 'aliases'
+                    },
+                     {
+                      'smtp_password': null,
+                      'from_name': 'Electric Universe',
+                      'type': 'external_email',
+                      'name': 'Electric Universe',
+                      'reference': {
+                          'save_sent': 'n',
+                          'signature': 'xxx',
+                          'use_sig_for_reply': 'NO',
+                          'reply_to': 'admin@runbox.com',
+                          'name': 'Electric Universe',
+                          'default_bcc': '',
+                          'email': 'admin@runbox.com',
+                          'msg_per_page': 0,
+                          'folder': 'Encoding Test',
+                          'sig_above': 'NO',
+                          'charset': null,
+                          'comp_new_window': null,
+                          'status': 0
+                      },
+                      'reply_to': 'admin@runbox.com',
+                      'smtp_address': null,
+                      'is_smtp_enabled': 0,
+                      'signature': 'xxx',
+                      'smtp_port': null,
+                      'id': 16448,
+                      'email': 'admin@runbox.com',
+                      'reference_type': 'preference',
+                      'smtp_username': null
+                     },
+                     {
+
+                         'smtp_address': null,
+                         'signature': '<p>ą</p>\r\n<p>eex</p>',
+                         'is_smtp_enabled': 0,
+                         'smtp_port': null,
+                         'from_name': 'folder1',
+                         'smtp_password': null,
+                         'type': 'external_email',
+                         'reply_to': 'admin@runbox.com',
+                         'reference': {
+                             'comp_new_window': null,
+                             'status': 0,
+                             'charset': null,
+                             'folder': 'LALA',
+                             'sig_above': 'NO',
+                             'email': 'admin@runbox.com',
+                             'msg_per_page': 0,
+                             'name': 'folder1',
+                             'reply_to': 'admin@runbox.com',
+                             'default_bcc': '',
+                             'use_sig_for_reply': 'YES',
+                             'signature': '<p>ą</p>\r\n<p>eex</p>',
+                             'save_sent': 'n'
+                         },
+                         'name': 'folder1',
+                         'email': 'admin@runbox.com',
+                         'reference_type': 'preference',
+                         'smtp_username': null,
+                         'id': 16450
+                     }
+                    ]
+        };
     }
 
     contacts(): any[] {

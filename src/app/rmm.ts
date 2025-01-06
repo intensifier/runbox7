@@ -25,7 +25,7 @@ import { Alias } from './rmm/alias';
 import { Me } from './rmm/me';
 import { RunboxDomain } from './rmm/runbox_domain';
 import { AccountSecurity } from './rmm/account-security';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
 import { AccountStorage } from './rmm/account-storage';
 import { AccountSettings } from './rmm/account-settings';
 
@@ -77,7 +77,7 @@ export class RMM {
     public handle_field_errors ( res, field_errors ) {
         if ( res.status === 'error' ) {
             if ( field_errors && res.field_errors ) {
-                field_errors = res.field_errors;
+                Object.assign(field_errors, res.field_errors);
             }
             if ( res.errors ) {
                 this.show_error( res.errors.join( '' ), 'Dismiss' );

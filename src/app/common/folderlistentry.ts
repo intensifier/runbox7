@@ -1,5 +1,5 @@
 // --------- BEGIN RUNBOX LICENSE ---------
-// Copyright (C) 2016-2018 Runbox Solutions AS (runbox.com).
+// Copyright (C) 2016-2022 Runbox Solutions AS (runbox.com).
 // 
 // This file is part of Runbox 7.
 // 
@@ -16,16 +16,19 @@
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
-export class Profile {
-    id:         number;
-    profile:    string;
-    name:       string;
-    from:       string;
-    reply_to:   string;
-    signature:  string;
 
-    constructor(properties: any) {
-        const self = this;
-        properties.forEach( key => self[key] = properties[key] );
+/// <reference lib="webworker.importscripts" />
+export class FolderListEntry {
+    isExpandable?: boolean;
+    priority?: number; // for sorting order
+
+    constructor(
+        public folderId: number,
+        public newMessages: number,
+        public totalMessages: number,
+        public folderType: string,
+        public folderName: string,
+        public folderPath: string,
+        public folderLevel: number) {
     }
 }

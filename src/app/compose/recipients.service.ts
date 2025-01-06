@@ -25,7 +25,7 @@ import { ContactKind, Contact } from '../contacts-app/contact';
 import { isValidEmail } from './emailvalidator';
 import { MailAddressInfo } from '../common/mailaddressinfo';
 import { Recipient } from './recipient';
-import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
+import { ProfileService } from '../profiles/profile.service';
 import moment from 'moment';
 
 enum RecipientOrigin {
@@ -45,9 +45,9 @@ export class RecipientsService {
     constructor(
         private searchService: SearchService,
         private contactsService: ContactsService,
-        rmmapi: RunboxWebmailAPI,
+        profileService: ProfileService
     ) {
-        rmmapi.getFromAddress().subscribe(
+        profileService.validProfiles.subscribe(
             froms => this.ownAddresses.next(new Set(froms.map(f => f.email))),
             _err  => this.ownAddresses.next(new Set([])),
         );
@@ -79,7 +79,7 @@ export class RecipientsService {
             }
         });
 
-        searchService.indexUpdatedSubject.subscribe(() => this.updateRecentlyUsed());
+        searchService.indexReloadedSubject.subscribe(() => this.updateRecentlyUsed());
 
         contactsService.contactsSubject.subscribe(contacts => {
             this.recipientsUpdating = this.recipientsUpdating.filter(r => r.origin !== RecipientOrigin.Contacts);
@@ -119,9 +119,10 @@ export class RecipientsService {
                 groups.map(g => this.recipientFromGroup(g))
             ).then((updateGroups) => {
                 this.updateRecipients(updateGroups);
-            }).catch(
-                () => this.recipients.next([])
-            );
+            }).catch((error) => {
+                console.error(error)
+                return this.recipients.next([])
+            });
         });
 
         this.recipients.subscribe(recipients => console.debug(recipients.length, 'recipients ready to use'));
@@ -196,9 +197,10 @@ export class RecipientsService {
                                 return null;
                             }
                         }
-                    ).catch(
-                        () => null
-                    )
+                    ).catch((error) => {
+                        console.error(error)
+                        return null
+                    })
                 );
             } else if (m.email) {
                 if (m.name) {

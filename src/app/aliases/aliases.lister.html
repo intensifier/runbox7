@@ -1,0 +1,80 @@
+<h1>Email Aliases</h1>
+<div>
+    <p>
+      Here you can set up and configure email aliases that point to your main Runbox account.
+    </p>
+    <p>
+      An alias is another email address that either uses one of the Runbox domains (e.g. runbox.com) or a domain of your own. You can manage your own email domains on the <a href="/mail/account_domain" target="rmm6">Email Hosting</a> page. Please allow up to 5 minutes for new aliases to propagate throughout the Runbox servers before using them.
+    </p>
+    <p>
+      Runbox addresses work across all of our domains, which means that if your username is example@runbox.com you can also receive email to your account at the address example@rbx.email. You can find a full list of our domains below.
+    </p>
+    <mat-expansion-panel>
+      <mat-expansion-panel-header>
+        <mat-panel-title> Show Runbox domain names </mat-panel-title>
+      </mat-expansion-panel-header>
+      <p>
+        The synonymous Runbox domain names that can currently be used with your Runbox email aliases are:
+      </p>
+        <span *ngFor="let d of domains; let isLast=last">{{ d.name }}<span *ngIf="!isLast">, </span><span *ngIf="isLast">.</span></span>
+    </mat-expansion-panel>
+    <p>
+      Note: Avoid aliases that could be perceived to be official Runbox addresses or ones used by other companies or individuals, as they may be deleted without prior notice.
+    </p>
+</div>
+
+<div class="aliases-lister">
+  <button 
+    id="create-new-alias"
+    (click)="create()"
+    color='primary'
+    mat-raised-button
+    >
+    Create new alias
+  </button>
+
+        <ng-content select="[section-header]" style="margin-top: 20px;"></ng-content>
+        <ng-content select="[section-description]"></ng-content>
+        <ng-content select="[section-buttons]"></ng-content>
+        <form *ngFor="let item of aliases; let i = index;">
+            <div style='width: 100%'>
+
+                <mat-form-field class="alias" style="margin: 10px;">
+                    <input
+                        matInput
+                        placeholder="Alias"
+                        readonly="true"
+                        [value]="item.localpart + '@' + item.domain"
+                    >
+                </mat-form-field>
+
+                <mat-form-field class="forward_to" style="margin: 10px;">
+                    <input
+                        matInput
+                        placeholder="Deliver to Account"
+                        readonly="true"
+                        [value]="item.forward_to"
+                    >
+                </mat-form-field>
+                <button
+                    (click)="edit(item)"
+                    id="edit-alias"
+                    color='primary'
+                    mat-raised-button
+                    style="margin: 10px;"
+                >
+                    Edit
+                </button>
+
+                <button
+                    (click)="delete(item)"
+                    id="delete-alias"
+                    color='primary'
+                    mat-raised-button
+                    style="margin: 10px;"
+                >
+                    Delete
+                </button>
+            </div>
+        </form>
+    </div>

@@ -5,10 +5,15 @@ describe('Interacting with mailviewer', () => {
         return cy.get('canvastable canvas:first-of-type');
     }
 
-    beforeEach(() => {
-        localStorage.setItem('localSearchPromptDisplayed221', 'true');
-        localStorage.setItem('messageSubjectDragTipShown', 'true');
-        indexedDB.deleteDatabase('messageCache');
+    beforeEach(async () => {
+        localStorage.setItem('221:localSearchPromptDisplayed', JSON.stringify('true'));
+        localStorage.setItem('221:Global:messageSubjectDragTipShown', JSON.stringify('true'));
+        localStorage.setItem('221:Desktop:mailViewerOnRightSide', JSON.stringify('true'));
+        localStorage.setItem('221:preference_keys', '["Global:messageSubjectDragTipShown", "Desktop:mailViewerOnRightSide"]');
+
+        (await indexedDB.databases())
+            .filter(db => db.name && /messageCache/.test(db.name))
+            .forEach(db => indexedDB.deleteDatabase(db.name!));
     });
 
     // it('Loading an email with loading errors displays an error', () => {
@@ -122,7 +127,7 @@ describe('Interacting with mailviewer', () => {
         // set full height
         cy.get('button[mattooltip="Full height"]').click().should(() => {
             // full height 
-            const resizerPercent = parseInt(localStorage.getItem('rmm7resizerpercentage'), 10);
+            const resizerPercent = parseInt(JSON.parse(localStorage.getItem('221:Desktop:rmm7resizerpercentage')), 10);
             expect(resizerPercent).to.eq(100);
         });
     });
@@ -140,18 +145,18 @@ describe('Interacting with mailviewer', () => {
         var resizerPercent = 0;
         cy.get('button[mattooltip="Full height"]').click().and(() => {
         // full height
-            resizerPercent = parseInt(localStorage.getItem('rmm7resizerpercentage'), 10);
+            resizerPercent = parseInt(JSON.parse(localStorage.getItem('221:Desktop:rmm7resizerpercentage')), 10);
         });
         // half height 
         cy.get('button[mattooltip="Half height"]').click().should(() => {
-            expect(parseInt(localStorage.getItem('rmm7resizerpercentage'), 10)).to.be.eq(50);
+            expect(parseInt(JSON.parse(localStorage.getItem('221:Desktop:rmm7resizerpercentage')), 10)).to.be.eq(50);
         // collect new value
-            resizerPercent = parseInt(localStorage.getItem('rmm7resizerpercentage'), 10);
+            resizerPercent = parseInt(JSON.parse(localStorage.getItem('221:Desktop:rmm7resizerpercentage')), 10);
         });
 
         // doesnt go away on pane close (persist for other emails)
         cy.get('button[mattooltip="Close"]').click().should(() => {
-            expect(parseInt(localStorage.getItem('rmm7resizerpercentage'), 10)).to.equal(resizerPercent);
+            expect(parseInt(JSON.parse(localStorage.getItem('221:Desktop:rmm7resizerpercentage')), 10)).to.equal(resizerPercent);
         });
     });
 

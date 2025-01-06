@@ -1,18 +1,18 @@
 // --------- BEGIN RUNBOX LICENSE ---------
 // Copyright (C) 2016-2022 Runbox Solutions AS (runbox.com).
-// 
+//
 // This file is part of Runbox 7.
-// 
+//
 // Runbox 7 is free software: You can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// 
+//
 // Runbox 7 is distributed in the hope that it will be useful, but
 // WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
@@ -24,27 +24,33 @@ import { Location } from '@angular/common';
 import { Router } from '@angular/router';
 
 import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
-import { FromAddress } from '../rmmapi/from_address';
-import { Observable, Subscription } from 'rxjs';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { Observable, Subscription, AsyncSubject, BehaviorSubject } from 'rxjs';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
 import { DraftDeskService, DraftFormModel } from './draftdesk.service';
 import { HttpClient, HttpEventType, HttpHeaders, HttpRequest } from '@angular/common/http';
 
-import { FormGroup, FormBuilder } from '@angular/forms';
-import { debounceTime, mergeMap } from 'rxjs/operators';
+import { UntypedFormGroup, UntypedFormBuilder } from '@angular/forms';
+import { debounceTime, distinctUntilChanged, mergeMap } from 'rxjs/operators';
 import { DialogService } from '../dialog/dialog.service';
 import { TinyMCEPlugin } from '../rmm/plugin/tinymce.plugin';
 import { RecipientsService } from './recipients.service';
 import { isValidEmailArray } from './emailvalidator';
 import { MailAddressInfo } from '../common/mailaddressinfo';
-import { AppSettingsService } from '../app-settings';
+import { Identity } from '../profiles/profile.service';
+import { MessageListService } from '../rmmapi/messagelist.service';
+import { MessageTableRowTool} from '../messagetable/messagetablerow';
+import { DefaultPrefGroups, PreferencesService } from '../common/preferences.service';
+import { objectEqualWithKeys } from '../common/util';
 
-declare const tinymce: any;
 declare const MailParser;
+
+const LOCAL_STORAGE_SHOW_POPULAR_RECIPIENTS = 'showPopularRecipients';
+const LOCAL_STORAGE_DEFAULT_HTML_COMPOSE = 'composeInHTMLByDefault';
+const DOWNLOAD_DRAFT_URL = '/ajax/download_draft_attachment?filename='
 
 @Component({
     moduleId: 'angular2/app/compose/',
-    // tslint:disable-next-line:component-selector
+    // eslint-disable-next-line @angular-eslint/component-selector
     selector: 'compose',
     templateUrl: 'compose.component.html',
     styleUrls: ['compose.component.scss']
@@ -66,11 +72,15 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
     public draggingOverDropZone = false;
     public editing = false;
     public isUnsaved = false;
-    public uploadprogress: number = null;
-    public uploadingFiles: FileList = null;
+    public savingInProgress = false;
+    // public uploadprogress: number = null;
+    public uploadingFiles: File[] = [];
     public uploadRequest: Subscription = null;
     public saved: Date = null;
     public tinymce_plugin: TinyMCEPlugin;
+    public isTemplate: boolean = false;
+    finishImageUpload: AsyncSubject<any> = null;
+    uploadProgress: BehaviorSubject<number> = new BehaviorSubject(-1);
     has_pasted_signature: boolean;
     signature: string;
     selector: string;
@@ -83,7 +93,9 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
     // to not include the recipients already picked
     filteredSuggestions: MailAddressInfo[] = [];
 
-    public formGroup: FormGroup;
+    public formGroup: UntypedFormGroup;
+    showPopularRecipients = true;
+    composeInHTMLByDefault = false;
 
     @Input() model: DraftFormModel = new DraftFormModel();
     @Output() draftDeleted: EventEmitter<number> = new EventEmitter();
@@ -92,12 +104,13 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
         public snackBar: MatSnackBar,
         private rmmapi: RunboxWebmailAPI,
         public draftDeskservice: DraftDeskService,
+        private messageListService: MessageListService,
         private http: HttpClient,
-        private formBuilder: FormBuilder,
+        private formBuilder: UntypedFormBuilder,
         private location: Location,
         private dialogService: DialogService,
         recipientservice: RecipientsService,
-        public settingsService: AppSettingsService,
+        public preferenceService: PreferencesService,
         private _ngZone: NgZone,
     ) {
         this.tinymce_plugin = new TinyMCEPlugin();
@@ -107,13 +120,17 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
             this.suggestedRecipients = suggestions;
             this.updateSuggestions();
         });
+        this.preferenceService.preferences.subscribe((prefs) => {
+            this.showPopularRecipients = prefs.get(`${this.preferenceService.prefGroup}:${LOCAL_STORAGE_SHOW_POPULAR_RECIPIENTS}`) === 'true';
+            this.composeInHTMLByDefault = prefs.get(`${DefaultPrefGroups.Global}:${LOCAL_STORAGE_DEFAULT_HTML_COMPOSE}`) === 'true';
+        });
     }
 
     ngOnInit() {
         if (this.model.isUnsaved()) {
             this.editing = true;
             this.isUnsaved = true;
-            const from: FromAddress = this.draftDeskservice.fromsSubject.value.find((f) =>
+            const from: Identity = this.draftDeskservice.fromsSubject.value.find((f) =>
                 f.nameAndAddress === this.model.from || f.email === this.model.from);
 
             this.has_pasted_signature = false;
@@ -125,16 +142,22 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                 if ( !this.has_pasted_signature && from.signature ) {
                     this.has_pasted_signature = true;
                     this.signature = from.signature;
-                    this.model.msg_body = this.signature.concat('\n\n', this.model.msg_body);
-                    if ( from.is_signature_html ) {
+                    // Sig is HTML, or Reply/Fwd Draft is HTML (contains .html)
+                    if ( from.is_signature_html || this.model.useHTML) {
                         this.model.useHTML = true;
                         this.model.html = this.signature.concat('\n\n', this.model.html || this.model.msg_body);
+                    } else {
+                        this.model.msg_body = this.signature.concat('\n\n', this.model.msg_body);
                     }
+
                 }
             }
-            // This.. shouldnt happen as only have content if reply/fwd
+            if (this.composeInHTMLByDefault) {
+                this.model.useHTML = true;
+            }
+            // above was true and we replied to a text-view email:
             if (this.model.useHTML && !this.model.html) {
-                this.model.html = this.model.msg_body;
+                this.model.html = this.model.msg_body.replace(/\n/g, '<br />\n');
                 console.log('Copied msg body to html attribute');
             }
             if (this.model.cc.length > 0) {
@@ -145,8 +168,10 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
             }
             if (this.model.replying) {
                 setTimeout(() => {
-                    this.messageTextArea.nativeElement.setSelectionRange(0, 0);
-                    this.messageTextArea.nativeElement.focus();
+                    if (!this.model.useHTML) {
+                        this.messageTextArea.nativeElement.setSelectionRange(0, 0);
+                        this.messageTextArea.nativeElement.focus();
+                    }
                 });
             }
         } else {
@@ -178,12 +203,27 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
         // Auto save
         this.formGroup.valueChanges
             .pipe(debounceTime(1000))
-            .subscribe(() => this.submit(false));
+            .pipe(distinctUntilChanged((prev, curr) => {
+                return objectEqualWithKeys(prev, curr, [
+                    'to', 'cc', 'bcc', 'from', 'subject', 'msg_body', 'html',
+                    'message_date', 'reply_to', 'reply_to_id', 'useHTML', 'mid',
+                    'replying',
+                ]);
+            }))
+            .subscribe(() => {
+                // Disable auto-save when in template edit mode. This prevents
+                // creating a draft while the user might be editing the template.
+                // The side-effect is that a draft created from a template won't
+                // have autosave until it was saved as a draft.
+                if (this.model.tid) return;
+
+                this.submit(false)
+            });
 
         this.formGroup.controls.from.valueChanges
             .pipe(debounceTime(1000))
             .subscribe((selected_from_address) => {
-                const from: FromAddress = this.draftDeskservice.fromsSubject.value.find((f) =>
+                const from: Identity = this.draftDeskservice.fromsSubject.value.find((f) =>
                     f.nameAndAddress === selected_from_address);
                 if ( this.formGroup.controls.msg_body.pristine ) {
                     if ( this.signature && from.signature ) {
@@ -193,7 +233,7 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                         const msg_body = this.formGroup.controls.msg_body.value.replace(rgx, new_signature);
                         this.signature = new_signature;
                         if (this.formGroup.value.useHTML && this.editor) {
-                            this.model.html.replace(rgx, new_signature);
+                            this.model.html = this.model.html.replace(rgx, new_signature);
                             this.editor.setContent(this.model.html);
                         } else {
                             this.formGroup.controls.msg_body.setValue(msg_body);
@@ -305,7 +345,8 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     public onFilesSelected(event) {
-        this.uploadFiles(event.target.files);
+        this.uploadFiles([...event.target.files]);
+        this.attachmentFileUploadInput.nativeElement.value = '';
     }
 
     public displayWithoutRBWUL(filename: string): string {
@@ -319,20 +360,25 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
     public dropFiles(event: DragEvent) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (!this.uploadingFiles) {
-            this.uploadFiles(event.dataTransfer.files);
+        if (this.uploadingFiles.length === 0) {
+            this.uploadFiles(Array.from(event.dataTransfer.files));
             this.hideDropZone();
         }
     }
 
 
     public removeAttachment(attachmentIndex: number) {
+        const toRemove = this.model.attachments[attachmentIndex];
+        const escapedUrl = DOWNLOAD_DRAFT_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const attUrlRegex = new RegExp('<img\\ssrc="[^"]*' + escapedUrl + toRemove.filename + '"[^>]*>');
+        this.model.html = this.model.html.replace(attUrlRegex, '');
+        this.editor.setContent(this.model.html);
         this.model.attachments.splice(attachmentIndex, 1);
         this.submit();
     }
 
-    public uploadFiles(files: FileList) {
-        this.uploadprogress = 0;
+    public uploadFiles(files: File[]) {
+        this.uploadProgress.next(0);
         this.uploadingFiles = files;
         const formdata: FormData = new FormData();
         for (let i = 0; i < files.length; i++) {
@@ -359,42 +405,87 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
         )).subscribe((event) => {
             if (event.type === HttpEventType.UploadProgress) {
                 const progress = event.loaded * 100 / event.total;
-                this.uploadprogress = progress === 100 ? null : progress;
+                this.uploadProgress.next(progress);
             } else if (event.type === HttpEventType.Response) {
                 if (!this.model.attachments) {
                     this.model.attachments = [];
                 }
                 (event.body as any).result.attachments
                     .forEach((att: any) => {
-                        att.file = att.filename;
+                      att.file = att.filename;
+                        att.sizeDisplay = MessageTableRowTool.formatBytes(att.size, 2);
                         this.model.attachments.push(att);
                     });
 
-                this.uploadprogress = null;
-                this.uploadingFiles = null;
+                this.uploadProgress.next(-1);
+                this.uploadingFiles = [];
+                if(this.finishImageUpload) {
+                    // We were submitting a dropped image attachment
+                    this.finishImageUpload.next((event.body as any).result.attachments[0].filename);
+                    this.finishImageUpload.complete();
+                    this.finishImageUpload = null;
+                }
                 this.submit();
             }
         }, error => {
-            this.uploadprogress = null;
-            this.uploadingFiles = null;
+            this.uploadProgress.next(-1);
+            this.uploadingFiles = [];
+            if(this.finishImageUpload) {
+                // We were submitting a dropped image attachment
+                this.finishImageUpload.next('');
+                this.finishImageUpload.complete();
+                this.finishImageUpload = null;
+            }
             this.snackBar.open(`Error uploading attachments: ${error.statusText}`, 'OK');
+        });
+    }
+
+    public tinyMCEUpload(blobInfo, progress) {
+        return new Promise((resolve, reject) => {
+            if(!this.finishImageUpload) {
+                this.finishImageUpload = new AsyncSubject();
+            }
+            this.uploadProgress.subscribe((res) => {
+                if(res > -1) {progress(res);}
+            });
+            this.finishImageUpload.subscribe((res) => {
+                if(res.length > 0) {
+                    resolve(DOWNLOAD_DRAFT_URL + res);
+                } else {
+                    reject({ message: 'Error storing image',
+                             remove: true });
+                }
+            });
+            this.uploadFiles([blobInfo.blob()]);
         });
     }
 
     public cancelAttachmentUpload() {
         this.uploadRequest.unsubscribe();
-        this.uploadprogress = null;
-        this.uploadingFiles = null;
+        this.uploadProgress.next(-1);
+        if (this.finishImageUpload) {
+            this.finishImageUpload.next('');
+            this.finishImageUpload.complete();
+        }
+        this.uploadingFiles = [];
     }
 
     public loadDraft(msgObj) {
+        if (msgObj.errors) {
+            this.snackBar.open(msgObj.errors[0], 'Ok')
+            throw msgObj
+        }
+
         const model = new DraftFormModel();
         model.mid = typeof msgObj.mid === 'string' ? parseInt(msgObj.mid, 10) : msgObj.mid;
         this.draftDeskservice.isEditing = model.mid;
-        model.attachments = msgObj.attachments.map((att) => Object.assign({
-            file_url: att.filename,
-            file: att.filename
-        }, att));
+        model.attachments = msgObj.attachments
+            ? msgObj.attachments.map((att) => Object.assign({
+                file_url: att.filename,
+                file: att.filename,
+                sizeDisplay: MessageTableRowTool.formatBytes(att.size, 2)
+            }, att))
+            : [];
 
         const from: any = msgObj.headers.from;
         if (from) {
@@ -470,6 +561,11 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                         this.formGroup.controls['msg_body'].setValue(editor.getContent({ format: 'text' }));
                         this.model.html = editor.getContent();
                     });
+                    editor.on('remove', () => {
+                        if(editor.queryCommandState('ToggleToolbarDrawer')) {
+                            editor.execCommand('ToggleToolbarDrawer');
+                        }
+                    });
                 },
                 init_instance_callback: (editor) => {
                     editor.setContent(
@@ -480,9 +576,21 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                             ? this.formGroup.value.msg_body.replace(/\n/g, '<br />\n')
                             :  ''
                     );
-                }
+                },
+                image_list: (cb) => cb(this.model.attachments ? this.model.attachments.map(att => ({
+                    title: this.displayWithoutRBWUL(att.file),
+                    value: DOWNLOAD_DRAFT_URL + att.file
+                })) : []),
+                paste_data_images: true,
+                automatic_uploads: true,
+                images_upload_credentials: true,
+                images_upload_handler: (blobInfo, progress) => {
+                    return this.tinyMCEUpload(blobInfo, progress);
+                },
+                // upload_url: this.router.createUrlTree(['/rest/v1/attachment/upload/single']).toString(),
             };
             this.tinymce_plugin.create(options);
+            this.preferenceService .set(DefaultPrefGroups.Global, LOCAL_STORAGE_DEFAULT_HTML_COMPOSE, 'true');
         } else {
             if (this.editor) {
                 this.model.html = this.editor.getContent();
@@ -496,6 +604,7 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                     textContent
                 );
             }
+            this.preferenceService.set(DefaultPrefGroups.Global, LOCAL_STORAGE_DEFAULT_HTML_COMPOSE, 'false');
         }
     }
 
@@ -580,6 +689,14 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     public submit(send: boolean = false) {
+        const isTemplate = Boolean(this.isTemplate ?? this.model.tid);
+
+        if (this.savingInProgress) {
+            return;
+        }
+
+        this.savingInProgress = true;
+
         if (send) {
             let validemails = false;
             validemails = isValidEmailArray(this.model.to);
@@ -620,14 +737,24 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
             this.model.preview = DraftFormModel.trimmedPreview(this.model.msg_body);
         }
 
+        // this.model.from should have a value (cos it defaults)
         const from = this.draftDeskservice.fromsSubject.value.find(
             (f) => this.model.from === f.nameAndAddress || this.model.from === f.email);
-        this.model.reply_to = from.reply_to;
+        let draft_from = this.model.from;
+        if (!from) {
+            console.log(`Compose: Could not find ${this.model.from} in ${this.draftDeskservice.fromsSubject.value}`);
+        } else {
+            this.model.reply_to = from.reply_to;
+            draft_from = from && from.id ?
+                from.from_name + '%' + from.email + '%' + from.id + '%' + from.folder :
+                from.email;
+        }
         if (send) {
             if (this.model.useHTML) {
                 // Replace RBWUL with ContentId
+                const escapedUrl = DOWNLOAD_DRAFT_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                 this.model.msg_body = this.model.msg_body
-                    .replace(/\"[^"]*ajax\/download_draft_attachment\?filename\=RBWUL-([a-z0-9]+)_[^"]+\"/g, '"cid:$1"');
+                    .replace(new RegExp('"[^"]*' + escapedUrl + 'RBWUL-([a-z0-9]+)_[^"]+"', 'g'), '"cid:$1"');
             }
             if (!from) {
                 this.snackBar.open('You must set from address', 'OK', {duration: 1000});
@@ -636,9 +763,7 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
             // Use old form based API for sending as JSON api doesn't support this
             this.rmmapi.saveDraft(Object.assign(
                 {}, this.model, {
-                    from: from && from.id ?
-                        from.name + '%' + from.email + '%' + from.id + '%' + from.folder :
-                        from.email
+                    from: draft_from
                 }
             ), send)
                 .subscribe((res) => {
@@ -655,6 +780,7 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                     this.draftDeskservice.isEditing = -1;
                     this.draftDeleted.emit(this.model.mid);
 
+                    this.savingInProgress = false;
                     this.dialogService.closeProgressDialog();
                     this.exitToTable();
                 }, (err) => {
@@ -668,14 +794,22 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                         `Error sending: ${msg}`,
                         'Dismiss'
                     );
+                    this.savingInProgress = false;
                     this.dialogService.closeProgressDialog();
                 });
         } else {
             this.rmmapi.me.pipe(mergeMap((me) => {
                 return this.http.post('/rest/v1/draft', {
-                    type: 'draft',
+                    ...(isTemplate ? {
+                        type: 'template',
+                        mid: this.model.tid ?? this.model.mid,
+                        tid: this.model.tid ?? this.model.mid,
+                    } : {
+                        type: 'draft',
+                        mid: this.model.mid
+                    }),
                     username: me.username,
-                    from: from && from.id ? from.name + '%' + from.email + '%' + from.id : from ? from.email : undefined,
+                    from: from && from.id ? from.from_name + '%' + from.email + '%' + from.id : from ? from.email : undefined,
                     from_email: from ? from.email : '',
                     to: this.model.to.map((recipient) => recipient.nameAndAddress).join(','),
                     cc: this.model.cc.map((recipient) => recipient.nameAndAddress).join(','),
@@ -688,7 +822,6 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                     tags: [],
                     ctype: this.model.useHTML ? 'html' : null,
                     save: send ? 'Send' : 'Save',
-                    mid: this.model.mid,
                     attachments: this.model.attachments ?
                         this.model.attachments
                             .filter((att) => att.file !== 'UTF-8Q')
@@ -698,6 +831,11 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                 });
             }
             )).subscribe((res: any) => {
+                this.messageListService.refreshFolderList();
+                if (this.isTemplate)  {
+                    this.snackBar.open('Saved to templates', 'Ok', { duration: 3000 });
+                }
+
                 if (res.mid) {
                     const newMid = typeof res.mid === 'string' ? parseInt(res.mid, 10) : res.mid;
                     if (this.model.isUnsaved()) {
@@ -714,6 +852,7 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                     this.saved = new Date();
                     this.saveErrorMessage = null;
 
+                    this.savingInProgress = false;
                     if (send) {
                         this.draftDeleted.emit(this.model.mid);
                         this.snackBar.open(res.status_msg, null, { duration: 3000 });
@@ -725,14 +864,20 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
                                 .map(fieldname =>
                                     `field ${fieldname}: ${err.field_errors[fieldname][0]}`);
                     }
+                    this.savingInProgress = false;
                     this.saveErrorMessage = `Error saving draft: ${msg}`;
                 });
         }
     }
 
+    public saveTemplate() {
+        this.isTemplate = true
+        this.submit(false);
+    }
+
     ngOnDestroy() {
         if (this.editor) {
-            tinymce.remove(this.editor);
+            this.tinymce_plugin.remove(this.editor);
         }
     }
 
@@ -766,6 +911,6 @@ export class ComposeComponent implements AfterViewInit, OnDestroy, OnInit {
 
         this.filteredSuggestions = this.suggestedRecipients.filter(
             s => !currentrecipients.find(r => r.address === s.address)
-        ).slice(0, 5);
+        ).slice(0, 10);
     }
 }

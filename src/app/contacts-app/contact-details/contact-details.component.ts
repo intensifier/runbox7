@@ -18,9 +18,9 @@
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, EventEmitter, Output, ViewChild } from '@angular/core';
-import { FormArray, FormBuilder, FormGroup } from '@angular/forms';
-import { MatDialog } from '@angular/material/dialog';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { UntypedFormArray, UntypedFormBuilder, UntypedFormGroup } from '@angular/forms';
+import { MatLegacyDialog as MatDialog } from '@angular/material/legacy-dialog';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Contact, ContactKind, AddressDetails, Address, GroupMember } from '../contact';
 import { ErrorDialog, ConfirmDialog, SimpleInputDialog, SimpleInputDialogParams } from '../../dialog/dialog.module';
@@ -29,11 +29,12 @@ import { filter, take } from 'rxjs/operators';
 import { ContactsService } from '../contacts.service';
 import { MobileQueryService } from '../../mobile-query.service';
 import { ContactPickerDialogComponent } from '../contact-picker-dialog.component';
-import { AppSettings, AppSettingsService } from '../../app-settings';
+import { AppSettings } from '../../app-settings';
 import { DraftDeskService } from '../../compose/draftdesk.service';
 import { RunboxWebmailAPI } from '../../rmmapi/rbwebmail';
 import { OnscreenComponent } from '../../onscreen/onscreen.component';
 import { Location, LocationStrategy, PathLocationStrategy } from '@angular/common';
+import { PreferencesService } from '../../common/preferences.service';
 
 @Component({
     selector: 'app-contact-details',
@@ -63,6 +64,7 @@ export class ContactDetailsComponent {
     kind = ContactKind;
 
     contactIcon: string;
+    avatarSource: string;
 
     contactIsDragged = false;
     memberIsDragged  = false;
@@ -72,8 +74,8 @@ export class ContactDetailsComponent {
     constructor(
         public dialog: MatDialog,
         public mobileQuery: MobileQueryService,
-        public settingsService: AppSettingsService,
-        private fb: FormBuilder,
+        public preferenceService:  PreferencesService,
+        private fb: UntypedFormBuilder,
         private rmmapi: RunboxWebmailAPI,
         private router: Router,
         private route: ActivatedRoute,
@@ -83,6 +85,10 @@ export class ContactDetailsComponent {
         private location: Location,
     ) {
         this.contactForm = this.createForm();
+
+        this.preferenceService.preferences.subscribe((prefs) => {
+            this.avatarSource = prefs.get(`${this.preferenceService.prefGroup}:avatarSource`);
+        });
 
         this.route.params.subscribe(params => {
             const contactid = params.id;
@@ -207,7 +213,7 @@ export class ContactDetailsComponent {
         });
     }
 
-    createForm(): FormGroup {
+    createForm(): UntypedFormGroup {
         return this.fb.group({
             id:         this.fb.control(''),
             full_name:  this.fb.control(''),
@@ -229,7 +235,7 @@ export class ContactDetailsComponent {
     }
 
     initializeFormArray(property, formGroupCreator): void {
-        const formArray = this.contactForm.get(property) as FormArray;
+        const formArray = this.contactForm.get(property) as UntypedFormArray;
         formArray.clear();
         for (let i = 0; i < this.contact[property].length; i++) {
             const formGroup = formGroupCreator();
@@ -237,7 +243,7 @@ export class ContactDetailsComponent {
         }
     }
 
-    createEmailFG(types = []): FormGroup {
+    createEmailFG(types = []): UntypedFormGroup {
         return this.fb.group({
             types:        this.fb.control(types),
             value:        this.fb.control(''),
@@ -245,7 +251,7 @@ export class ContactDetailsComponent {
         });
     }
 
-    createAdrFG(types = []): FormGroup {
+    createAdrFG(types = []): UntypedFormGroup {
         return this.fb.group({
             types: this.fb.control(types),
             value: this.fb.group({
@@ -258,8 +264,8 @@ export class ContactDetailsComponent {
         });
     }
 
-    addFGtoFA(fg: FormGroup, faName: string): void {
-        const fa = this.contactForm.get(faName) as FormArray;
+    addFGtoFA(fg: UntypedFormGroup, faName: string): void {
+        const fa = this.contactForm.get(faName) as UntypedFormArray;
         fa.push(fg);
     }
 
@@ -288,7 +294,10 @@ export class ContactDetailsComponent {
         console.log('Saving contact:', this.contact);
         this.contactsservice.saveContact(this.contact).then(
             id => this.router.navigateByUrl('/contacts/' + id)
-        ).catch(err => this.snackBar.open(err.message, 'Ok'));
+        ).catch(err => {
+            console.error(err);
+            return this.snackBar.open(err.message, 'Ok');
+        });
     }
 
     rollback(): void {

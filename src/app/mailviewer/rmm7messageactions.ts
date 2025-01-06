@@ -24,8 +24,8 @@ import { SingleMailViewerComponent } from './singlemailviewer.component';
 import { MoveMessageDialogComponent } from '../actions/movemessage.action';
 import { SearchService } from '../xapian/searchservice';
 import { MessageListService } from '../rmmapi/messagelist.service';
-import { MatDialog } from '@angular/material/dialog';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatLegacyDialog as MatDialog } from '@angular/material/legacy-dialog';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
 import { MessageActions } from './messageactions';
 import { RunboxWebmailAPI, MessageFlagChange } from '../rmmapi/rbwebmail';
 import { ProgressDialog } from '../dialog/dialog.module';
@@ -47,14 +47,20 @@ export class RMM7MessageActions implements MessageActions {
                          ) {
         args['updateLocal'](args['messageIds']);
         args['updateRemote'](args['messageIds']).subscribe((data) => {
-            const updateFrom = data['result']['changed_time'] || 0;
-            this.searchService.updateIndexWithNewChanges({
-                start_message: 'Refreshing index after user action',
-                list_messages_args: [0, 0, updateFrom * 1000, RunboxWebmailAPI.LIST_ALL_MESSAGES_CHUNK_SIZE, true],
-                set_next_update_time: false,
-            });
-            if (args['afterwards']) {
-                args['afterwards'](data);
+            if (data['status'] === 'error' || data['status'] === 'warning') {
+                this.rmmapi.showBackendErrors(data);
+            } else {
+                const updateFrom = data['result']['changed_time'] || 0;
+                this.searchService.indexWorker.postMessage(
+                    {'action': 'updateIndexWithNewChanges',
+                     'args': {
+                         start_message: 'Refreshing index after user action',
+                         list_messages_args: [0, 0, updateFrom * 1000, RunboxWebmailAPI.LIST_ALL_MESSAGES_CHUNK_SIZE, true],
+                         set_next_update_time: false,
+                     } });
+                if (args['afterwards']) {
+                    args['afterwards'](data);
+                }
             }
         });
     }
@@ -163,9 +169,11 @@ export class RMM7MessageActions implements MessageActions {
                     this.messageListService.moveMessages(msgIds, 'Inbox', true);
 
                     if (this.searchService.localSearchActivated) {
-                        msgIds.forEach((msgId) => {
-                            const msgInfo = this.messageListService.messagesById[msgId];
-                            this.searchService.indexingTools.addMessageToIndex(msgInfo);
+                      this.searchService.indexWorker.postMessage(
+                        {'action': 'addMessageToIndex',
+                         'args': {
+                           'msginfos': [ msgIds.map((msgId) => this.messageListService.messagesById[msgId])]
+                         }
                         });
                     }
                 }
@@ -188,6 +196,18 @@ export class RMM7MessageActions implements MessageActions {
                 this.mailViewerComponent.close();
             }
         });
+    }
+
+    blockSender(param) {
+        const msg = `Blocking sender: ${param}`;
+        const snackBarRef = this.snackBar.open(msg);
+        this.rmmapi.blockSender(param).subscribe((res) => {
+          if ( res.status === 'error' ) {
+            snackBarRef.dismiss();
+            this.snackBar.open('There was an error with Sender blocking functionality. Please try again.', 'Dismiss');
+          }
+        });
+        snackBarRef.dismiss();
     }
 
     // Update mailviewer menu flag icon after flagging?

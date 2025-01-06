@@ -1,44 +1,46 @@
 // --------- BEGIN RUNBOX LICENSE ---------
 // Copyright (C) 2016-2018 Runbox Solutions AS (runbox.com).
-// 
+//
 // This file is part of Runbox 7.
-// 
+//
 // Runbox 7 is free software: You can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// 
+//
 // Runbox 7 is distributed in the hope that it will be useful, but
 // WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
 
 import { Injectable, NgZone } from '@angular/core';
-import { Observable, from, Subject, AsyncSubject } from 'rxjs';
+import { Observable, from, Subject, AsyncSubject, firstValueFrom } from 'rxjs';
 import { share } from 'rxjs/operators';
 import { MessageInfo } from '../common/messageinfo';
 import { MailAddressInfo } from '../common/mailaddressinfo';
+import { FolderListEntry } from '../common/folderlistentry';
 
 import { Contact } from '../contacts-app/contact';
 import { RunboxCalendar } from '../calendar-app/runbox-calendar';
 import { RunboxCalendarEvent } from '../calendar-app/runbox-calendar-event';
 import { Product } from '../account-app/product';
 import { DraftFormModel } from '../compose/draftdesk.service';
-import { MatSnackBar } from '@angular/material/snack-bar';
-import { map, mergeMap } from 'rxjs/operators';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
+import { filter, map, mergeMap } from 'rxjs/operators';
 
 import { HttpClient, HttpResponse } from '@angular/common/http';
 import { RunboxLocale } from '../rmmapi/rblocale';
 import { RMM } from '../rmm';
-import { FromAddress } from './from_address';
+import { Identity, FromPriority } from '../profiles/profile.service';
 import { MessageCache } from './messagecache';
 import { LRUMessageCache } from './lru-message-cache';
 import moment from 'moment';
 import { SavedSearchStorage } from '../saved-searches/saved-searches.service';
+import { PreferencesResult } from '../common/preferences.service';
 
 export class MessageFields {
     id: number;
@@ -50,27 +52,6 @@ export class MessageFields {
     folder_id: number;
     from: string;
     to: string;
-}
-
-export class FolderListEntry {
-    isExpandable?: boolean;
-    priority?: number; // for sorting order
-
-    constructor(
-        public folderId: number,
-        public newMessages: number,
-        public totalMessages: number,
-        public folderType: string,
-        public folderName: string,
-        public folderPath: string,
-        public folderLevel: number) {
-    }
-}
-
-export class FolderStatsEntry {
-    total: number;
-    total_unseen: number;
-    total_seen: number;
 }
 
 export class Alias {
@@ -111,6 +92,8 @@ export class RunboxMe {
     public is_trial: boolean;
     public uses_own_domain: boolean;
 
+    public account_status: string;
+
     public owner?: {
         uid: number;
         username: string;
@@ -133,11 +116,14 @@ export class RunboxMe {
     }
 
     getCreatedMoment(): moment.Moment {
-      return moment(this.user_created, 'X');
+        return moment(this.user_created, 'X');
     }
     newerThan(duration: number): boolean {
         const now = moment();
         return this.getCreatedMoment().diff(now) < duration;
+    }
+    isExpired(): boolean {
+        return this.account_status === 'expired';
     }
 }
 
@@ -185,40 +171,42 @@ export class RunboxWebmailAPI {
 
     public last_on_interval;
 
+    private messageCache: AsyncSubject<MessageCache> = new AsyncSubject();
     private messageContentsRequestCache = new LRUMessageCache<Promise<MessageContents>>();
 
     constructor(
         private http: HttpClient,
         private ngZone: NgZone,
-        private messageCache: MessageCache,
         private snackBar: MatSnackBar,
         public rmm: RMM,
     ) {
         this.rblocale = new RunboxLocale();
-        this.http.get('/rest/v1/me')
-            .pipe(
-                map((res: any) => res.result),
-                map((res: any) => {
-                    res.uid = parseInt(res.uid, 10);
-                    res.disk_used = res.quotas ? parseInt(res.quotas.disk_used, 10) : null;
-                    return new RunboxMe(res);
-                })
-            ).subscribe((me: RunboxMe) => {
-                this.me.next(me);
-                this.me.complete();
 
-                this.ngZone.runOutsideAngular(() =>
-                    this.last_on_interval = setInterval(() => this.ngZone.run(() => {
-                        this.updateLastOn().subscribe();
-                    }), 5 * 60 * 1000)
-                );
+        this.me.subscribe(me => {
+            this.messageCache.next(new MessageCache(me.uid));
+            this.messageCache.complete();
+        });
+    }
 
-                this.updateLastOn().subscribe();
-            });
+    public setRunboxMe(res:any) {
+        res.uid = parseInt(res.uid, 10);
+        res.disk_used = res.quotas ? parseInt(res.quotas.disk_used, 10) : null;
+        const me = new RunboxMe(res);
+        this.me.next(me);
+        this.me.complete();
+
+        if (!this.last_on_interval) {
+            this.ngZone.runOutsideAngular(() =>
+                this.last_on_interval = setInterval(() => this.ngZone.run(() => {
+                    this.updateLastOn().subscribe();
+                }), 5 * 60 * 1000)
+            );
+            this.updateLastOn().subscribe();
+        }
     }
 
     public deleteCachedMessageContents(messageId: number) {
-        this.messageCache.delete(messageId);
+        this.messageCache.subscribe(cache => cache.delete(messageId));
         this.messageContentsRequestCache.delete(messageId);
     }
 
@@ -229,7 +217,8 @@ export class RunboxWebmailAPI {
             // but it turns out that pulling a single row from indexedDB (or maybe from Dexie specifically?)
             // can easily take over 100ms: the difference between "instant" and "fast"
             // Since instant is the only acceptable result, we cache indexedDB lookups here.
-            cached = this.messageCache.get(messageId);
+            cached = firstValueFrom(this.messageCache)
+                .then(cache => cache.get(messageId));
             this.messageContentsRequestCache.add(messageId, cached);
         }
         return cached;
@@ -243,27 +232,30 @@ export class RunboxWebmailAPI {
             } else {
                 const messagePromise = new Promise<MessageContents>((resolve, reject) => {
                     this.http.get('/rest/v1/email/' + messageId)
-                        .subscribe((response) => {
+                        .subscribe(async (response) => {
+                        const messageCache = await firstValueFrom(this.messageCache);
                         if (response['status'] === 'success') {
                             const msg = Object.assign( new MessageContents(), response['result']);
                             msg.status = response['status'];
-                            this.messageCache.set(messageId, msg);
+                            messageCache.set(messageId, msg);
                             resolve(msg);
                         } else if (response['status'] === 'warning') {
                             // exists but we couldnt fetch it all
                             const msg = Object.assign( new MessageContents());
                             msg.status = response['status'];
                             msg.errors = response['errors'];
-                            this.messageCache.set(messageId, msg);
+                            messageCache.set(messageId, msg);
                             resolve(msg);
                         } else {
-                            // doesnt even seem to exist?
-                            this.showBackendErrors(response);
+                            // We load message data at unexpected times
+                            // for the user, don't display a generic error yet
+                            console.log('Error loading message ' + messageId);
+                            console.log(response);
                             delete this.messageContentsRequestCache[messageId];
                             reject(response);
                         }
                     }, err => {
-                        delete this.messageContentsRequestCache[messageId];
+                        this.deleteCachedMessageContents(messageId);
                         reject(err);
                     });
                 });
@@ -286,6 +278,8 @@ export class RunboxWebmailAPI {
         );
     }
 
+  // FIXME: duplicated in restapi_standalone (no gui) for web worker
+  // make there be no duplicates!
     public listAllMessages(page: number,
         sinceid: number = 0,
         sincechangeddate: number = 0,
@@ -302,48 +296,53 @@ export class RunboxWebmailAPI {
                     (folder ? '&folder=' + folder : '') +
                     '&avoidcacheuniqueparam=' + new Date().getTime();
 
-        return this.http.get(url, { responseType: 'text' }).pipe(
-            map((txt: string) => txt.length > 0 ? txt.split('\n') : []),
-            map((lines: string[]) =>
-                lines.map((line) => {
-                    const parts = line.split('\t');
-                    const from_ = parts[7];
-                    const to = parts[8];
-                    const fromInfo: MailAddressInfo[] = MailAddressInfo.parse(from_);
-                    const toInfo: MailAddressInfo[] = MailAddressInfo.parse(to);
-                    const size: number = parseInt(parts[10], 10);
-                    const attachment: boolean = parts[11] === 'y';
-                    const seenFlag: boolean = parseInt(parts[4], 10) === 1;
-                    const answeredFlag: boolean = parseInt(parts[5], 10) === 1;
-                    const flaggedFlag: boolean = parseInt(parts[6], 10) === 1;
+            return this.me.pipe(
+                filter(me => !me.isExpired()),
+                mergeMap((me) => {
+                    return this.http.get(url, { responseType: 'text' }).pipe(
+                        map((txt: string) => txt.length > 0 ? txt.split('\n') : []),
+                        map((lines: string[]) =>
+                            lines.map((line) => {
+                                const parts = line.split('\t');
+                                const from_ = parts[7];
+                                const to = parts[8];
+                                const fromInfo: MailAddressInfo[] = MailAddressInfo.parse(from_);
+                                const toInfo: MailAddressInfo[] = MailAddressInfo.parse(to);
+                                const size: number = parseInt(parts[10], 10);
+                                const attachment: boolean = parts[11] === 'y';
+                                const seenFlag: boolean = parseInt(parts[4], 10) === 1;
+                                const answeredFlag: boolean = parseInt(parts[5], 10) === 1;
+                                const flaggedFlag: boolean = parseInt(parts[6], 10) === 1;
 
 
-                    const ret = new MessageInfo(
-                        parseInt(parts[0], 10), // id
-                        new Date(parseInt(parts[1], 10) * 1000), // changed date
-                        new Date(parseInt(parts[2], 10) * 1000), // message date
-                        parts[3],                                // folder
-                        seenFlag,                                // seen flag
-                        answeredFlag,                            // answered flag
-                        flaggedFlag,                             // flagged flag
-                        fromInfo,                                // from
-                        toInfo,                                  // to
-                        [],                                      // cc
-                        [],                                      // bcc
-                        parts[9],                                // subject
-                        parts[12],                               // plaintext body
-                        size,                                    // size
-                        attachment                               // attachment
+                                const ret = new MessageInfo(
+                                    parseInt(parts[0], 10), // id
+                                    new Date(parseInt(parts[1], 10) * 1000), // changed date
+                                    new Date(parseInt(parts[2], 10) * 1000), // message date
+                                    parts[3],                                // folder
+                                    seenFlag,                                // seen flag
+                                    answeredFlag,                            // answered flag
+                                    flaggedFlag,                             // flagged flag
+                                    fromInfo,                                // from
+                                    toInfo,                                  // to
+                                    [],                                      // cc
+                                    [],                                      // bcc
+                                    parts[9],                                // subject
+                                    parts[12],                               // plaintext body
+                                    size,                                    // size
+                                    attachment                               // attachment
+                                );
+                                if (size === -1) {
+                                    // Size = -1 means deleted flag is set - ref hack in Webmail.pm
+                                    ret.deletedFlag = true;
+                                }
+                                return ret;
+                            })
+                           )
                     );
-                    if (size === -1) {
-                        // Size = -1 means deleted flag is set - ref hack in Webmail.pm
-                        ret.deletedFlag = true;
-                    }
-                    return ret;
                 })
-            )
-        );
-    }
+            );
+        }
 
     subscribeShowBackendErrors(req: any) {
         req.subscribe((res: any) => {
@@ -377,7 +376,7 @@ export class RunboxWebmailAPI {
             'ordered_ids': order
         }).pipe(share());
         this.subscribeShowBackendErrors(req);
-        return req.pipe(map((res: any) => res.status === 'success'));
+        return req.pipe(filter((res: any) => res.status === 'success'));
     }
 
     renameFolder(folderId: number, newFolderName: string): Observable<boolean> {
@@ -386,7 +385,7 @@ export class RunboxWebmailAPI {
             'folder_id': folderId
         }).pipe(share());
         this.subscribeShowBackendErrors(req);
-        return req.pipe(map((res: any) => res.status === 'success'));
+        return req.pipe(filter((res: any) => res.status === 'success'));
     }
 
     emptyFolder(folderId: number): Observable<boolean> {
@@ -394,21 +393,7 @@ export class RunboxWebmailAPI {
             'folder_id': folderId
         }).pipe(share());
         this.subscribeShowBackendErrors(req);
-        return req.pipe(map((res: any) => res.status === 'success'));
-    }
-
-    folderStats(folderName: string): Observable<FolderStatsEntry> {
-        const req = this.http.get('/rest/v1/email_folder/stats/' + folderName).pipe(share());
-        this.subscribeShowBackendErrors(req);
-        return req.pipe(
-            map((response: any) => {
-                const fse = new FolderStatsEntry();
-                fse.total = response.result.stats.total;
-                fse.total_unseen = response.result.stats.total_unseen;
-                fse.total_seen = response.result.stats.total_seen;
-                return fse;
-            })
-        );
+        return req.pipe(filter((res: any) => res.status === 'success'));
     }
 
     updateFolderCounts(folderName: string): Observable<any> {
@@ -427,13 +412,13 @@ export class RunboxWebmailAPI {
 
         const req = this.http.put('/rest/v1/email_folder/move', requestBody).pipe(share());
         this.subscribeShowBackendErrors(req);
-        return req.pipe(map((res: any) => res.status === 'success'));
+        return req.pipe(filter((res: any) => res.status === 'success'));
     }
 
     deleteFolder(folderid: number): Observable<boolean> {
         const req = this.http.delete(`/rest/v1/email_folder/delete/${folderid}`).pipe(share());
         this.subscribeShowBackendErrors(req);
-        return req.pipe(map((res: any) => res.status === 'success'));
+        return req.pipe(filter((res: any) => res.status === 'success'));
     }
 
     getFolderList(): Observable<Array<FolderListEntry>> {
@@ -479,11 +464,14 @@ export class RunboxWebmailAPI {
         return this.http.post('/rest/v1/spam/', JSON.stringify(params));
     }
 
+    public blockSender(param): Observable<any> {
+      return this.http.post('/rest/v1/rules/block_sender', JSON.stringify({'sender': param}));
+    }
+
     // Moves to Trash if not already in Trash
     // Deletes if currently in Trash
     public deleteMessages(messageIds: number[]): Observable<any> {
-        const ids = messageIds.join(',');
-        return this.http.delete(`/rest/v1/email/${ids}`);
+        return this.http.post(`/rest/v1/email/batch_delete`, { ids: messageIds });
     }
 
     public markSeen(messageId: any, seen_flag_value = 1): Observable<any> {
@@ -503,39 +491,66 @@ export class RunboxWebmailAPI {
             map((res: any) => res.result as MessageFields));
     }
 
-    public getFromAddress(): Observable<FromAddress[]> {
-        return this.http.get('/rest/v1/profiles/verified').pipe(
+    public getProfiles(): Observable<Identity[]> {
+        return this.http.get('/rest/v1/profiles').pipe(
             map((res: any) => {
-                const results = [];
-                Object.keys(res['result']).forEach( (k) => {
-                    res['result'][k].forEach( (item) => {
-                        const profile = FromAddress.fromObject({
-                            id: item.profile.id,
-                            email: item.profile.email,
-                            reply_to: item.profile.reply_to,
-                            name: item.profile.from_name,
-                            signature: item.profile.signature,
-                            type: k,
-                            priority: item.profile.from_priority,
-                        });
-                        results.push(profile);
-                    });
-                });
-                return results;
-            })
-        );
+                return res.results.map(p => Identity.fromObject(p));
+            }));
     }
 
-    public getAliases(): Observable<Alias[]> {
-        return this.http.get('/ajax/aliases')
+    public createProfile(profileData: any): Observable<boolean> {
+        const req = this.http.post(
+            '/rest/v1/profile',
+            profileData
+        ).pipe(share());
+        this.subscribeShowBackendErrors(req);
+        return req.pipe(filter((res: any) => res.status === 'success'));
+    }
+
+    // FIXME: This should be PATCH
+    public updateProfile(profileId: number, profileData: any): Observable<boolean> {
+        const req = this.http.put(
+            '/rest/v1/profile/' + profileId,
+            profileData
+        ).pipe(share());
+        this.subscribeShowBackendErrors(req);
+        return req.pipe(filter((res: any) => res.status === 'success'));
+    }
+
+    public deleteProfile(profileId: number): Observable<boolean> {
+        const req = this.http.delete(
+            '/rest/v1/profile/' + profileId
+        ).pipe(share());
+        this.subscribeShowBackendErrors(req);
+        return req.pipe(filter((res: any) => res.status === 'success'));
+    }
+
+    // FIXME: This should be a POST
+    public resendValidationEmail(profileId: number): Observable<boolean> {
+        const req = this.http.put(
+            '/rest/v1/profile/' + profileId + '/resend_validation_email',
+            {}
+        ).pipe(share());
+        this.subscribeShowBackendErrors(req);
+        return req.pipe(filter((res: any) => res.status === 'success'));
+    }
+
+    public updateFromPriorities(priorities: FromPriority[]) {
+        const req = this.http.post(
+          '/rest/v1/profile/from_priority/', {"from_priorities": priorities }
+        ).pipe(share());
+        this.subscribeShowBackendErrors(req);
+        return req.pipe(filter((res: any) => res.status === 'success'));
+    }
+
+    public getAliasLimits(): Observable<any> {
+        return this.http.get('/rest/v1/aliases/limits');
+    }
+
+    public getRunboxDomains(): Observable<string[]> {
+        return this.http.get('/rest/v1/runbox_domains')
             .pipe(
-                map((res: any) => res.aliases),
-                map((aliases: any[]) =>
-                    aliases.map((alias) => new Alias(alias.id,
-                        alias.localpart,
-                        alias.name,
-                        alias.localpart + '@' + alias.name))
-                )
+                map((res: any) => res.results),
             );
     }
 
@@ -848,6 +863,18 @@ export class RunboxWebmailAPI {
 
     getProductDomain(apid: number): Observable<string> {
         return this.http.get('/rest/v1/account_product/product_domain/' + apid).pipe(
+            map((res: HttpResponse<any>) => res['result'])
+        );
+    }
+
+    getPreferences(): Observable<PreferencesResult> {
+        return this.http.get('/rest/v1/webmail/preferences').pipe(
+            map((res: HttpResponse<any>) => res['result'])
+        );
+    }
+
+    setPreferences(level, preferences): Observable<PreferencesResult> {
+        return this.http.post('/rest/v1/webmail/preferences', preferences).pipe(
             map((res: HttpResponse<any>) => res['result'])
         );
     }

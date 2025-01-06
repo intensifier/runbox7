@@ -18,9 +18,9 @@
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, OnInit, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
-import { MatCheckboxChange } from '@angular/material/checkbox';
+import { MatLegacyCheckboxChange as MatCheckboxChange } from '@angular/material/legacy-checkbox';
 
-import { MailAddressInfo } from 'runbox-searchindex/mailaddressinfo';
+import { MailAddressInfo } from '@runboxcom/runbox-searchindex';
 import moment from 'moment';
 
 import { Contact } from '../contacts-app/contact';
@@ -28,7 +28,7 @@ import { SearchService, SearchIndexDocumentData } from '../xapian/searchservice'
 import { isValidEmail } from '../compose/emailvalidator';
 import { filter, take } from 'rxjs/operators';
 import { ReplaySubject } from 'rxjs';
-import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
+import { ProfileService } from '../profiles/profile.service';
 import { UsageReportsService } from '../common/usage-reports.service';
 
 export interface ContactHilights {
@@ -42,8 +42,9 @@ export interface ContactHilights {
 enum TimeSpan {
     TODAY,
     YESTERDAY,
-    LAST3,
-    LAST7,
+    LASTWEEK,
+    LASTMONTH,
+    LASTYEAR,
     CUSTOM,
 }
 
@@ -85,7 +86,7 @@ export class StartDeskComponent implements OnInit {
     // TODO: from appsettings or such?
     unreadOnly = true;
     timeSpan = TimeSpan.TODAY;
-    folder = FolderSelection.ALL;
+    folder = FolderSelection.INBOX;
     sortOrder = SortOrder.COUNT;
 
     // for the folder message selector.
@@ -104,18 +105,18 @@ export class StartDeskComponent implements OnInit {
     constructor(
         private cdr: ChangeDetectorRef,
         private searchService: SearchService,
-        private rmmapi: RunboxWebmailAPI,
+        private profileService: ProfileService,
         private usage: UsageReportsService,
     ) { }
 
     ngOnInit() {
         this.usage.report('overview-desk');
-        this.rmmapi.getFromAddress().subscribe(
+        this.profileService.validProfiles.subscribe(
             froms => this.ownAddresses.next(new Set(froms.map(f => f.email.toLowerCase()))),
             _err  => this.ownAddresses.next(new Set([])),
         );
         this.searchService.initSubject.pipe(filter(enabled => enabled)).subscribe(() => this.updateCommsOverview());
-        this.searchService.indexUpdatedSubject.subscribe(() => this.updateCommsOverview());
+        this.searchService.indexReloadedSubject.subscribe(() => this.updateCommsOverview());
     }
 
     public async updateCommsOverview(): Promise<void> {
@@ -137,7 +138,7 @@ export class StartDeskComponent implements OnInit {
                     case FolderSelection.ALL:
                         return true;
                     case FolderSelection.INBOX:
-                        return msg.folder === 'Inbox';
+                        return msg.folder.match(/^Inbox|INBOX$/g);
                     case FolderSelection.CUSTOM:
                         return !this.hiddenFolders.has(msg.folder);
                 }
@@ -315,10 +316,12 @@ export class StartDeskComponent implements OnInit {
                 return [new Date(), null];
             case TimeSpan.YESTERDAY:
                 return [moment().subtract(1, 'day').toDate(), new Date()];
-            case TimeSpan.LAST3:
-                return [moment().subtract(2, 'day').toDate(), null];
-            case TimeSpan.LAST7:
-                return [moment().subtract(6, 'day').toDate(), null];
+            case TimeSpan.LASTWEEK:
+                return [moment().subtract(1, 'week').toDate(), null];
+            case TimeSpan.LASTMONTH:
+                return [moment().subtract(1, 'month').toDate(), null];
+            case TimeSpan.LASTYEAR:
+                return [moment().subtract(1, 'year').toDate(), null];
             case TimeSpan.CUSTOM:
                 return [new Date(), null];
         }

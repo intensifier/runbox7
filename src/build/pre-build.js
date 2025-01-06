@@ -7,15 +7,18 @@ cp.execSync('git checkout package-lock.json');
 const packageLockJSON = JSON.parse(fs.readFileSync('package-lock.json'));
 const packageJSON = JSON.parse(fs.readFileSync('package.json'));
 
-Object.keys(packageJSON.dependencies).concat(Object.keys(packageJSON.devDependencies)).forEach(packagename => {
-    process.stdout.write(`checking integrity of package ${packagename}`);
-    const package = JSON.parse(fs.readFileSync(`node_modules/${packagename}/package.json`));
-    if(packageLockJSON.dependencies[packagename].integrity !== package._integrity) {
-        console.error(`${packagename} integrity does not match with package-lock.json. Please reinstall.`);
-        process.exit(1);
-    }
-    process.stdout.write(` ${package._integrity.substr(0, 20)}... - OK\r\n`);
-});
+// FIXME: is this necessary? the package.json & package-lock.json format has changed, package.json no longer
+// contains a _integrity field, package-lock.json not uses the field packages instead of dependencies.
+
+// Object.keys(packageJSON.dependencies).concat(Object.keys(packageJSON.devDependencies)).forEach(packagename => {
+//     process.stdout.write(`checking integrity of package ${packagename}\n`);
+//     const package = JSON.parse(fs.readFileSync(`node_modules/${packagename}/package.json`));
+//     if(packageLockJSON.packages[`node_modules/${packagename}`].integrity !== package._integrity) {
+//         console._rror(`${packagename} integrity does not match with package-lock.json. Please reinstall.`);
+//         process.exit(1);
+//     }
+//     process.stdout.write(` ${package._integrity.substr(0, 20)}... - OK\r\n`);
+// });
 
 console.log('All dependency versions ok. Will build production bundle.');
 
@@ -42,12 +45,3 @@ if (dirty) {
     console.log('Please commit your changes before the build');
     process.exit(1);
 }
-
-let config = fs.readFileSync('ngsw-config.json').toString();
-const hash = cp.execSync('git rev-parse --short HEAD').toString().trim();
-const epoch = cp.execSync('git show --pretty="%ct" --no-patch').toString().trim();
-console.log(`Setting appData commit hash to ${hash}`);
-config = config.replace('__COMMIT_HASH__', hash);
-config = config.replace('__BUILD_TIME__', build_time);
-config = config.replace('__BUILD_EPOCH__', epoch);
-fs.writeFileSync('ngsw-config.json', config);

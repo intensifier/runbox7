@@ -18,17 +18,30 @@
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, OnInit } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { RunboxMe, RunboxWebmailAPI } from '../rmmapi/rbwebmail';
 
 @Component({
   selector: 'app-welcome',
   templateUrl: './welcomedesk.component.html',
   styleUrls: ['./welcomedesk.component.scss']
 })
+
 export class WelcomeDeskComponent implements OnInit {
+  public me: RunboxMe;
 
-  constructor() { }
-
-  ngOnInit() {
+  constructor(
+    private activatedRoute: ActivatedRoute,
+    public rmmapi: RunboxWebmailAPI
+  ) {
+    this.rmmapi.me.subscribe(me => this.me = me);
   }
-
+  
+  public postSignup = ''
+    
+  ngOnInit() {
+    this.activatedRoute.queryParams.subscribe(params => {
+      this.postSignup = params['postSignup'];
+    })
+  }
 }

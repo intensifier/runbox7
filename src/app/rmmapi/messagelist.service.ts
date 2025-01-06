@@ -23,9 +23,11 @@ import { throwError as observableThrowError, BehaviorSubject, ReplaySubject, Asy
 import { catchError, distinctUntilChanged, map, filter, take } from 'rxjs/operators';
 
 import { MessageInfo } from '../common/messageinfo';
+import { FolderListEntry } from '../common/folderlistentry';
 
-import { RunboxWebmailAPI, FolderListEntry } from './rbwebmail';
+import { RunboxWebmailAPI } from './rbwebmail';
 import { SearchService } from '../xapian/searchservice';
+import { objectEqualWithKeys } from '../common/util';
 
 export class FolderMessageCountEntry {
     constructor(
@@ -56,9 +58,12 @@ export class MessageListService {
     folderMessageLists: { [folder: string]: MessageInfo[] } = {};
     messagesById: { [id: number]: MessageInfo } = {};
     folderCounts: FolderMessageCountMap;
+    staleFolders: { [name: string]: boolean } = {};
 
     trashFolderName = 'Trash';
     spamFolderName = 'Spam';
+    unindexedFolders = ['Trash', 'Spam', 'Templates'];
+    templateFolderName = 'Templates';
 
     ignoreUnreadInFolders = [ 'Sent' ];
 
@@ -77,9 +82,9 @@ export class MessageListService {
             .pipe(distinctUntilChanged((prev: FolderListEntry[], curr: FolderListEntry[]) => {
                 return prev.length === curr.length
                     && prev.every((f, index) =>
-                        f.folderId === curr[index].folderId
-                        && f.totalMessages === curr[index].totalMessages
-                        && f.newMessages === curr[index].newMessages);
+                        objectEqualWithKeys(f, curr[index], [
+                            'folderId', 'totalMessages', 'newMessages', 'folderName'
+                        ]));
             }))
             .subscribe((folders) => {
                 // Will fallback on the folder counters set above for folders not in the search index
@@ -119,9 +124,10 @@ export class MessageListService {
     public setCurrentFolder(folder: string) {
         this.currentFolder = folder;
         this.searchservice.pipe(take(1)).subscribe(searchservice => {
-            if (!searchservice.localSearchActivated ||
-                folder === this.spamFolderName ||
-                folder === this.trashFolderName ) {
+            // searchservice / index worker uses currentFolder for checking counts
+            searchservice.setCurrentFolder(folder);
+            if (!searchservice.localSearchActivated
+                || this.unindexedFolders.includes(folder) ) {
                 // Always fetch fresh folder listing when setting current folder
 
                 this.fetchFolderMessages(true);
@@ -138,7 +144,7 @@ export class MessageListService {
         return new Promise((resolve, _) => {
             return this.searchservice.pipe(take(1)).subscribe(searchservice => {
                 const xapianFolders = new Set(
-                    searchservice.localSearchActivated
+                    searchservice.localSearchActivated && searchservice.api
                         ?  searchservice.api.listFolders().map(f => f[0])
                         : []
                 );
@@ -180,15 +186,6 @@ export class MessageListService {
         return new Promise((resolve, _) => {
             this.rmmapi.getFolderList()
                 .subscribe((folders) => {
-                    const trashfolder = folders.find(folder => folder.folderType === 'trash');
-                    if (trashfolder) {
-                        this.trashFolderName = trashfolder.folderName;
-                    }
-                    const spamfolder = folders.find(folder => folder.folderType === 'spam');
-                    if (spamfolder) {
-                        this.spamFolderName = spamfolder.folderName;
-                    }
-
                     this.folderListSubject.next(folders);
                     resolve(folders);
                 });
@@ -333,12 +330,30 @@ export class MessageListService {
         messageIds.forEach((msgId) => {
             const msg = this.messagesById[msgId];
             if (!msg) {
+                // we only have T/S messages now, so if index on
+                // might not have this one
+                // artificial count update
+                if (this.unindexedFolders.includes(folderName)) {
+                    this.folderCounts[folderName].total++;
+                }
+                if (this.unindexedFolders.includes(this.currentFolder)) {
+                    this.folderCounts[folderName].total--;
+                }
                 return;
             }
             if (msg.folder === folderName) {
                 return;
             }
 
+            // Default the folderCounts, in case (why?) not set yet
+            if (!this.folderCounts[msg.folder]) {
+                this.folderCounts[msg.folder] = new FolderMessageCountEntry(0, 0);
+                console.error(`moveMessages: Missing folderCounts for {msg.folder}`);
+            }
+            if (!this.folderCounts[folderName]) {
+                this.folderCounts[folderName] = new FolderMessageCountEntry(0, 0);
+                console.error(`moveMessages: Missing folderCounts for {folderName}`);
+            }
             // Remove from visible emails
             // If we havent loaded/viewed this folder, we won't have any
             if (this.folderMessageLists[msg.folder]) {
@@ -379,7 +394,8 @@ export class MessageListService {
                 this.folderCounts[folderName].unread++;
             }
         });
-        // Message counts update
+      // Message counts update
+      console.log('msl moveMessages updating folderCounts');
         this.folderMessageCountSubject.next(this.folderCounts);
         // current folder contents update
         this.messagesInViewSubject.next(this.folderMessageLists[this.currentFolder]);
@@ -393,6 +409,9 @@ export class MessageListService {
         const folder = this.currentFolder;
         if (!this.folderMessageLists[folder]) {
             this.folderMessageLists[folder] = [];
+        }
+        if (this.staleFolders[folder]) {
+            resetContents = true;
         }
         const messageList = this.folderMessageLists[folder];
         const sinceid = !resetContents && messageList.length > 0 ? messageList[messageList.length - 1].id : 0;
@@ -417,5 +436,22 @@ export class MessageListService {
                 this.messagesInViewSubject.next(this.folderMessageLists[this.currentFolder]);
                 this.fetchInProgress = false;
             });
+    }
+
+    /*
+     * After index worker updates, tell messagelist management which
+     * folders had changes (and thus should be refreshed
+     */
+
+    public updateStaleFolders(folders: string[]) {
+        folders.forEach((f) => this.staleFolders[f] = true);
+        // check if current visible folder has updates
+        // refresh if localsearch not activated (aka setCurrentFolder)
+        this.searchservice.pipe(take(1)).subscribe(searchservice => {
+          if (!searchservice.localSearchActivated &&
+            this.staleFolders[this.currentFolder]) {
+            this.fetchFolderMessages();
+          }
+        });
     }
 }

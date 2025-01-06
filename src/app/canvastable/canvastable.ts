@@ -29,15 +29,16 @@ import {
   DoCheck, NgZone, EventEmitter, OnInit, ViewChild
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatButtonModule } from '@angular/material/button';
-import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
-import { MatRadioModule } from '@angular/material/radio';
+import { MatLegacyButtonModule as MatButtonModule } from '@angular/material/legacy-button';
+import { MatLegacyMenuModule as MatMenuModule, MatLegacyMenuTrigger as MatMenuTrigger } from '@angular/material/legacy-menu';
+import { MatLegacyRadioModule as MatRadioModule } from '@angular/material/legacy-radio';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
-import { MatTooltipModule, MatTooltip } from '@angular/material/tooltip';
+import { MatLegacyTooltipModule as MatTooltipModule, MatLegacyTooltip as MatTooltip } from '@angular/material/legacy-tooltip';
 import { BehaviorSubject ,  Subject } from 'rxjs';
 import { MessageDisplay } from '../common/messagedisplay';
 import { CanvasTableColumn } from './canvastablecolumn';
+import { PreferencesService } from '../common/preferences.service';
 
 const MIN_COLUMN_WIDTH = 40;
 
@@ -56,6 +57,7 @@ const getCSSClassProperty = (className, propertyName) => {
 
 export interface CanvasTableSelectListener {
   rowSelected(rowIndex: number, colIndex: number, multiSelect?: boolean): void;
+  saveColumnWidthsPreference(widths);
 }
 
 export class FloatingTooltip {
@@ -76,7 +78,7 @@ export namespace CanvasTable {
 }
 
 @Component({
-  // tslint:disable-next-line:component-selector
+  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'canvastable',
   moduleId: 'angular2/app/canvastable/',
   templateUrl: 'canvastable.component.html'
@@ -112,10 +114,10 @@ export class CanvasTableComponent implements AfterViewInit, DoCheck, OnInit {
   private wantedCanvasWidth = 300;
   private wantedCanvasHeight = 300;
 
-  private _rowheight = 32;
-  private fontheight = 15;
-  private fontheightSmall = 14;
-  private fontheightSmaller = 13;
+  private _rowheight = 28;
+  private fontheight = 14;
+  private fontheightSmall = 13;
+  private fontheightSmaller = 12;
 
   private scrollbarwidth = 12;
 
@@ -567,7 +569,7 @@ export class CanvasTableComponent implements AfterViewInit, DoCheck, OnInit {
         try {
           this.dopaint();
           if (this.rows) {
-            this.repaintDoneSubject.next();
+            this.repaintDoneSubject.next(undefined);
           }
         } catch (e) {
           console.log(e);
@@ -1351,7 +1353,7 @@ export class CanvasTableComponent implements AfterViewInit, DoCheck, OnInit {
 }
 
 @Component({
-  // tslint:disable-next-line:component-selector
+  // eslint-disable-next-line @angular-eslint/component-selector
   selector: 'canvastablecontainer',
   templateUrl: 'canvastablecontainer.component.html',
   moduleId: 'angular2/app/canvastable/',
@@ -1368,6 +1370,8 @@ export class CanvasTableContainerComponent implements OnInit {
 
   columnWidths = {};
 
+  preferenceService: PreferencesService;
+
   @Input() configname = 'default';
   @Input() canvastableselectlistener: CanvasTableSelectListener;
 
@@ -1382,19 +1386,19 @@ export class CanvasTableContainerComponent implements OnInit {
   private selectAllTimeout;
 
   constructor(private renderer: Renderer2) {
-    const oldSavedColumnWidths = localStorage.getItem('canvasNamedColumnWidths');
-    if (oldSavedColumnWidths) {
-      const colWidthSet = Object.keys(JSON.parse(oldSavedColumnWidths)).filter((col) => col.length > 0).join(',');
-      const newColWidths = {};
-      newColWidths[colWidthSet] = JSON.parse(oldSavedColumnWidths);
-      localStorage.setItem('canvasNamedColumnWidthsBySet', JSON.stringify(newColWidths));
-      localStorage.removeItem('canvasNamedColumnWidths');
-    }
+    // const oldSavedColumnWidths = localStorage.getItem('canvasNamedColumnWidths');
+    // if (oldSavedColumnWidths) {
+    //   const colWidthSet = Object.keys(JSON.parse(oldSavedColumnWidths)).filter((col) => col.length > 0).join(',');
+    //   const newColWidths = {};
+    //   newColWidths[colWidthSet] = JSON.parse(oldSavedColumnWidths);
+    //   localStorage.setItem('canvasNamedColumnWidthsBySet', JSON.stringify(newColWidths));
+    //   localStorage.removeItem('canvasNamedColumnWidths');
+    // }
 
-    const savedColumnWidths = localStorage.getItem('canvasNamedColumnWidthsBySet');
-    if (savedColumnWidths) {
-      this.columnWidths = JSON.parse(savedColumnWidths);
-    }
+    // const savedColumnWidths = localStorage.getItem('canvasNamedColumnWidthsBySet');
+    // if (savedColumnWidths) {
+    //   this.columnWidths = JSON.parse(savedColumnWidths);
+    // }
   }
 
   saveColumnWidths() {
@@ -1404,7 +1408,8 @@ export class CanvasTableContainerComponent implements OnInit {
       newColWidths[c.name] = c.width;
     }
     this.columnWidths[colWidthSet] = newColWidths;
-    localStorage.setItem('canvasNamedColumnWidthsBySet', JSON.stringify(this.columnWidths));
+    this.canvastableselectlistener.saveColumnWidthsPreference(this.columnWidths);
+    // localStorage.setItem('canvasNamedColumnWidthsBySet', JSON.stringify(this.columnWidths));
   }
 
   ngOnInit() {
@@ -1437,7 +1442,7 @@ export class CanvasTableContainerComponent implements OnInit {
 
   colresize(clientX: number) {
     if (this.colResizeInitialClientX) {
-      // tslint:disable-next-line:no-unused-expression
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
 
       const column: CanvasTableColumn = this.canvastable.columns[this.colResizeColumnIndex];
       if (column && column.width) {

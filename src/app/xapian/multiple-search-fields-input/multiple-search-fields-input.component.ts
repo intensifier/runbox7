@@ -18,16 +18,8 @@
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, OnChanges, Output, EventEmitter, Input } from '@angular/core';
-import { FormBuilder, FormGroup } from '@angular/forms';
-
-class MultipleSearchFieldsInputFormData {
-  allfieldsandcontent: string = null;
-  from: string = null;
-  to: string = null;
-  subject: string = null;
-  date: string = null;
-  currentfolderonly: boolean = null;
-}
+import { FormBuilder } from '@angular/forms';
+import { distinctUntilChanged } from 'rxjs/operators';
 
 @Component({
   selector: 'app-multiple-search-fields-input',
@@ -36,7 +28,7 @@ class MultipleSearchFieldsInputFormData {
 })
 export class MultipleSearchFieldsInputComponent implements OnChanges {
 
-  formGroup: FormGroup;
+  formGroup;
 
   @Input() currentFolder: string;
   @Output() searchexpression = new EventEmitter<string>();
@@ -45,16 +37,43 @@ export class MultipleSearchFieldsInputComponent implements OnChanges {
   constructor(
     formbuilder: FormBuilder
   ) {
-    this.formGroup = formbuilder.group(new MultipleSearchFieldsInputFormData());
-    this.formGroup.valueChanges.subscribe(() => this.buildSearchExpression());
+    this.formGroup = formbuilder.group({
+      allfieldsandcontent: [''],
+      from: [''],
+      to: [''],
+      subject: [''],
+      date: [''],
+      currentfolderonly: [false],
+      hasAttachment: [false],
+      hasReply: [false],
+      hasFlag: [false],
+      unreadOnly: [{value: false, disabled: true}]
+    });
+
+    this.formGroup.valueChanges
+      .pipe(distinctUntilChanged())
+      .subscribe(() => {
+      this.enableDisableUnread();
+      this.buildSearchExpression()
+    });
   }
 
   ngOnChanges() {
+    this.enableDisableUnread();
     this.buildSearchExpression();
   }
 
   closePanel() {
     this.close.emit(true);
+  }
+
+  enableDisableUnread() {
+    const fields = this.formGroup.value;
+    if (fields.allfieldsandcontent && fields.allfieldsandcontent.length > 0 || fields.hasAttachment || fields.hasReply || fields.hasFlag) {
+      this.formGroup.controls['unreadOnly'].enable({emitEvent: false});
+    } else {
+      this.formGroup.controls['unreadOnly'].disable({emitEvent: false});
+    }
   }
 
   buildSearchExpression() {
@@ -68,13 +87,17 @@ export class MultipleSearchFieldsInputComponent implements OnChanges {
       }
     };
 
-    const fields = this.formGroup.value as MultipleSearchFieldsInputFormData;
+    const fields = this.formGroup.value;
     const searchexpression = (fields.currentfolderonly ? (and() + 'folder:"' + this.currentFolder.replace(/\"/g, '') + '"') : '') +
       (fields.from ? (and() + 'from:"' + fields.from.replace(/\"/g, '') + '"') : '') +
       (fields.to ? (and() + 'to:"' + fields.to.replace(/\"/g, '') + '"') : '') +
       (fields.subject ? (and() + 'subject:"' + fields.subject.replace(/\"/g, '') + '"') : '') +
-      (fields.date ? (and() + 'date:' + fields.date + '') : '') +
-      (fields.allfieldsandcontent ? (and() + '(' + fields.allfieldsandcontent + ')') : '');
+      (fields.allfieldsandcontent ? (and() + '(' + fields.allfieldsandcontent + ')') : '') +
+      (fields.hasAttachment ? (and() + 'flag:attachment') : '') +
+      (fields.hasReply ? (and() + 'flag:answered') : '') +
+      (fields.hasFlag ? (and() + 'flag:flagged') : '') +
+      (fields.date ? (and() + 'date:' + fields.date + '') : '') + // FIXME: This parameter must come last
+      (fields.unreadOnly ? (and() + 'NOT flag:seen') : ''); // FIXME: This parameter must also come last...
 
     this.searchexpression.emit(searchexpression);
   }

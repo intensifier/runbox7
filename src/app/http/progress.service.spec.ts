@@ -19,8 +19,8 @@
 
 import { TestBed, waitForAsync } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { MatDialogModule } from '@angular/material/dialog';
-import { MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatLegacyDialogModule as MatDialogModule } from '@angular/material/legacy-dialog';
+import { MatLegacySnackBarModule as MatSnackBarModule } from '@angular/material/legacy-snack-bar';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
 import { HTTP_INTERCEPTORS } from '@angular/common/http';
@@ -30,7 +30,6 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { filter, take } from 'rxjs/operators';
 import { RMMAuthGuardService } from '../rmmapi/rmmauthguard.service';
 import { RMMOfflineService } from '../rmmapi/rmmoffline.service';
-import { MessageCache } from '../rmmapi/messagecache';
 
 describe('ProgressService', () => {
     let rmmapiservice: RunboxWebmailAPI;
@@ -49,7 +48,6 @@ describe('ProgressService', () => {
         providers: [
             RMMOfflineService,
             RunboxWebmailAPI,
-            MessageCache,
             RMMAuthGuardService,
             ProgressService,
             { provide: HTTP_INTERCEPTORS, useClass: RMMHttpInterceptorService, multi: true}
@@ -68,11 +66,8 @@ describe('ProgressService', () => {
             take(1)
         ).subscribe(() => httpProgressSeen = true);
 
-        const req = httpMock.expectOne(`/rest/v1/me`);
-
-        req.flush({
-            'result': {'uid': '11', 'last_name': 'testuser'},
-            'status': 'success'}, {status: 200, statusText: 'OK'});
+        // We now expect login / httpauth to set the runboxme values
+        rmmapiservice.setRunboxMe({'uid': '11', 'last_name': 'testuser'});
 
         const last_on_req = httpMock.expectOne(`/rest/v1/last_on`);
         last_on_req.flush(200);

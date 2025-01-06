@@ -22,10 +22,10 @@ import { Router } from '@angular/router';
 
 import { Contact } from '../contacts-app/contact';
 import { ContactsService } from '../contacts-app/contacts.service';
-import { AppSettingsService } from '../app-settings';
+import { PreferencesService } from '../common/preferences.service';
 
 @Component({
-    // tslint:disable-next-line:component-selector
+    // eslint-disable-next-line @angular-eslint/component-selector
     selector: 'rmm7-contact-card',
     template: `
         <span [ngStyle]="{ 'text-decoration': contactsEntry ? 'underline' : '' }">
@@ -44,11 +44,11 @@ export class ContactCardComponent implements OnChanges {
     avatarUrl: string;
 
     constructor(
-        settingsService: AppSettingsService,
+        preferenceService:  PreferencesService,
         private router: Router,
         private contactsservice: ContactsService,
     ) {
-        settingsService.settingsSubject.subscribe(_ => this.ngOnChanges());
+        preferenceService.preferences.subscribe(_ => this.ngOnChanges());
     }
 
     ngOnChanges() {

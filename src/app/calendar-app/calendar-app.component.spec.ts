@@ -29,9 +29,11 @@ import { MobileQueryService } from '../mobile-query.service';
 import { StorageService } from '../storage.service';
 import { SearchService } from '../xapian/searchservice';
 import { UsageReportsService } from '../common/usage-reports.service';
+import { PreferencesService } from '../common/preferences.service';
 import { RouterTestingModule } from '@angular/router/testing';
-import { of, Observable } from 'rxjs';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { take } from 'rxjs/operators';
+import { of, Observable, ReplaySubject } from 'rxjs';
+import { MatLegacySnackBar as MatSnackBar } from '@angular/material/legacy-snack-bar';
 import { RunboxCalendar } from './runbox-calendar';
 import { RunboxCalendarEvent } from './runbox-calendar-event';
 import { MatIcon } from '@angular/material/icon';
@@ -168,6 +170,16 @@ END:VCALENDAR
                 providers: [
                     MobileQueryService,
                     StorageService,
+                    { provide: PreferencesService, useValue: {
+                        preferences: new ReplaySubject<Map<string, any>>(),
+
+                        set(level: string, key: string, entry: any) {
+                            this.preferences.pipe(take(1)).subscribe(entries => {
+                                entries.set(`${level}:${key}`, entry);
+                                this.preferences.next(this.prefs);
+                            });
+                        },
+                    } },
                     { provide: RMMAuthGuardService, useValue: {
                         canActivate:      (_r, _s) => true,
                         canActivateChild: (_r, _s) => true,

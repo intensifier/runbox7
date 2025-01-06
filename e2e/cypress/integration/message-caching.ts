@@ -1,13 +1,15 @@
 /// <reference types="cypress" />
 
 describe('Message caching', () => {
-    beforeEach(() => {
-        localStorage.setItem('localSearchPromptDisplayed221', 'true');
-        localStorage.setItem('messageSubjectDragTipShown', 'true');
+    beforeEach(async () => {
+        localStorage.setItem('221:localSearchPromptDisplayed', 'true');
+        (await indexedDB.databases())
+            .filter(db => db.name && /messageCache/.test(db.name))
+            .forEach(db => indexedDB.deleteDatabase(db.name!));
+
     });
 
   it('should cache all messages on first time page load', () => {
-        indexedDB.deleteDatabase('messageCache');
         cy.intercept('/rest/v1/email/12').as('message12requested');
 
         cy.visit('/');
@@ -16,6 +18,13 @@ describe('Message caching', () => {
     });
 
     it('should not re-request messages after a page reload', () => {
+        cy.intercept('/rest/v1/email/12').as('message12requested');
+
+        cy.visit('/');
+        cy.wait('@message12requested', {'timeout':10000});
+        // This should have fetched/cached the message
+
+        // Now don't fetch it again:
         cy.visit('/#Inbox:12');
         let called = false;
         cy.intercept('/rest/v1/email/12', (_req) => {

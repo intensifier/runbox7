@@ -1,4 +1,2 @@
-import './commands'
-import 'cypress-file-upload'
-require('cypress-terminal-report').installSupport();
-
+import './commands';
+require('cypress-terminal-report/src/installLogsCollector')();

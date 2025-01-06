@@ -1,6 +1,6 @@
 <app-runbox-container>
     <nav>
-        <h3 class="settingsmenu">Settings Menu</h3>
+        <h3 class="sideNavHeader">Settings Menu</h3>
         <mat-accordion>
             <!-- MAIL -->
             <mat-expansion-panel>
@@ -14,13 +14,11 @@
                         <mat-icon mat-list-icon svgIcon="account-group"></mat-icon> <span>Identities</span>
                     </p>
                 </mat-list-item>
-                <a href="/mail/account_alias" target="rmm6">
-                    <mat-list-item [matTooltip]="rmm6tooltip">
-                        <p mat-line>
-                            <mat-icon mat-list-icon svgIcon="account-circle"></mat-icon> <span>Email Aliases</span>
-                        </p>
-                    </mat-list-item>
-                </a>
+                <mat-list-item routerLink="/account/aliases">
+                    <p mat-line>
+                        <mat-icon mat-list-icon svgIcon="account-circle"></mat-icon> <span>Email Aliases</span>
+                    </p>
+                </mat-list-item>
             </mat-expansion-panel>
 
             <!-- MANAGER -->
@@ -92,7 +90,7 @@
                 </mat-expansion-panel-header>
                 <mat-list-item routerLink="/account/details">
                     <p mat-line>
-                        <mat-icon mat-list-icon svgIcon="face"></mat-icon> <span>Personal Details</span>
+                        <mat-icon mat-list-icon svgIcon="face-man"></mat-icon> <span>Personal Details</span>
                     </p>
                 </mat-list-item>
                 <mat-list-item routerLink="/account/storage">

@@ -19,55 +19,85 @@
 
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router, CanActivateChild } from '@angular/router';
+import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, UrlTree, Router, CanActivateChild } from '@angular/router';
 import { Observable } from 'rxjs';
 import { map, take } from 'rxjs/operators';
+import { RunboxWebmailAPI } from './rbwebmail';
 
 @Injectable()
 export class RMMAuthGuardService implements CanActivate, CanActivateChild {
 
     urlBeforeLogin = '';
     wasLoggedIn = false;
-
+    loginPromise;
+    currentMe;
+    
     constructor(
         public http: HttpClient,
-        public router: Router
+        public router: Router,
+        private rmmapi : RunboxWebmailAPI,
     ) {
-
     }
 
-    checkLogin(): Promise<boolean> {
-        return new Promise<boolean>((resolve, _reject) => {
-            this.isLoggedIn().pipe(take(1)).subscribe(
-                success => {
-                    if (!success) {
-                        this.redirectToLogin();
+    checkLogin(): Promise<boolean | UrlTree> {
+        if (!this.loginPromise) {
+            this.loginPromise = new Promise<boolean | UrlTree>((resolve, _reject) => {
+                this.isLoggedIn().pipe(take(1)).subscribe(
+                    success => {
+                        this.loginPromise = null;
+                        if (!success) {
+                            resolve(this.router.parseUrl('/login'));
+                        } else {
+                            resolve(success);
+                        }
+                    },
+                    error => {
+                        this.loginPromise = null;
+                        if (error.status === 403) {
+                            resolve(false);
+                        } else {
+                            // No indication that the user is unauthorized.
+                            // Let them in, and have the httpinterceptor figure out what to do.
+                            resolve(true);
+                        }
                     }
-                    resolve(success);
-                },
-                error => {
-                    if (error.status === 403) {
-                        resolve(false);
-                    } else {
-                        // No indication that the user is unauthorized.
-                        // Let them in, and have the httpinterceptor figure out what to do.
-                        resolve(true);
-                    }
-                }
-            );
-        });
+                );
+            });
+        }
+        return this.loginPromise;
     }
 
-    isLoggedIn(): Observable<boolean> {
+    isLoggedIn(): Observable<boolean | UrlTree> {
         return this.http.get('/rest/v1/me').pipe(
             map((res: any) => {
-                this.wasLoggedIn = res && res.status === 'success';
-                return this.wasLoggedIn;
+                if (res && res.status === 'success') {
+                    this.wasLoggedIn = true;
+                    const me = res.result;
+                    // ugly? we could subscribe to it..
+                    this.currentMe = me;
+                    this.rmmapi.setRunboxMe(me);
+                } else {
+                    this.wasLoggedIn = false;
+                }
+                return this.checkStatus();
             }),
         );
     }
 
-    canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | Observable<boolean> | Promise<boolean> {
+    checkStatus(): boolean | UrlTree {
+        // Expired users are only allowed to visit account/subscriptions
+        if (this.currentMe && this.urlBeforeLogin
+            && this.currentMe.account_status === 'expired'
+          && !this.urlBeforeLogin.startsWith('/account')) {
+            console.log('Before login ' + this.urlBeforeLogin);
+            return this.router.parseUrl('/account/subscriptions');
+        } else {
+            return this.wasLoggedIn;
+        }
+        
+    }
+
+    canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | UrlTree | Observable<boolean | UrlTree> | Promise<boolean | UrlTree> {
         this.urlBeforeLogin = state.url;
 
         // Asynchronously check in whether the user is logged in or not
@@ -79,8 +109,9 @@ export class RMMAuthGuardService implements CanActivate, CanActivateChild {
         // So if we saw user being logged in before, we assume that they still are:
         // the async login check will still continue in the background
         // and kick the user out in case we were wrong.
+        
         if (this.wasLoggedIn) {
-            return true;
+            return this.checkStatus();
         }
 
         // If the user was not logged in last time we checked,
@@ -88,7 +119,7 @@ export class RMMAuthGuardService implements CanActivate, CanActivateChild {
         return loginCheck;
     }
 
-    canActivateChild(childRoute: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | Observable<boolean> | Promise<boolean> {
+    canActivateChild(childRoute: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | UrlTree | Observable<boolean | UrlTree> | Promise<boolean | UrlTree> {
         return this.canActivate(childRoute, state);
     }
 
@@ -97,6 +128,8 @@ export class RMMAuthGuardService implements CanActivate, CanActivateChild {
             this.urlBeforeLogin = '/';
         }
         console.log('Will navigate back to ', this.urlBeforeLogin);
-        this.router.navigate(['login']);
+        if(this.wasLoggedIn) {
+            this.router.navigate(['login']);
+        }
     }
 }

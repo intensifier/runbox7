@@ -1,34 +1,34 @@
 // --------- BEGIN RUNBOX LICENSE ---------
 // Copyright (C) 2016-2018 Runbox Solutions AS (runbox.com).
-// 
+//
 // This file is part of Runbox 7.
-// 
+//
 // Runbox 7 is free software: You can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// 
+//
 // Runbox 7 is distributed in the hope that it will be useful, but
 // WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
 
 import { Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
-import { MatDialog } from '@angular/material/dialog';
+import { MatLegacyDialog as MatDialog } from '@angular/material/legacy-dialog';
 import { MatTreeFlatDataSource, MatTreeFlattener } from '@angular/material/tree';
 import { ConfirmDialog } from '../dialog/dialog.module';
-import { FolderListEntry } from '../rmmapi/rbwebmail';
+import { FolderListEntry } from '../common/folderlistentry';
 import { FolderMessageCountMap } from '../rmmapi/messagelist.service';
 import { SimpleInputDialog, SimpleInputDialogParams } from '../dialog/simpleinput.dialog';
 
 import { Observable } from 'rxjs';
 import { first, map, filter, take } from 'rxjs/operators';
 import { FlatTreeControl } from '@angular/cdk/tree';
-import {Hotkey, HotkeysService} from 'angular2-hotkeys';
+import {ExtendedKeyboardEvent, Hotkey, HotkeysService} from 'angular2-hotkeys';
 
 class FolderNode {
     children: FolderNode[];
@@ -62,7 +62,7 @@ export class RenameFolderEvent {
 @Component({
     moduleId: 'angular2/app/folder/',
     templateUrl: 'folderlist.component.html',
-    // tslint:disable-next-line:component-selector
+    // eslint-disable-next-line @angular-eslint/component-selector
     selector: 'rmm-folderlist',
     styleUrls: ['folderlist.component.css']
 })
@@ -118,6 +118,7 @@ export class FolderListComponent implements OnChanges {
             }
         } catch (e) {
             /* we don't care why it failed, it just means that we'll show all folders as collapsed */
+            console.error(e)
         }
 
         this.treeControl = new FlatTreeControl<FolderListEntry>(this._getLevel, this._isExpandable);
@@ -197,8 +198,8 @@ export class FolderListComponent implements OnChanges {
     /**
      * Folderlist entry is 48 pixels, so if mouse is in the upper region suggest dropping above,
      * if in the middle suggest inside, or suggest below if in the lower region
-     * 
-     * @param offsetY 
+     *
+     * @param offsetY
      * @returns drop position above, below or inside (see enum DropPosition)
      */
     isDropAboveOrBelowOrInside(offsetY: number): DropPosition {

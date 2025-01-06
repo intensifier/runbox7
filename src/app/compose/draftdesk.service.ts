@@ -1,32 +1,37 @@
 // --------- BEGIN RUNBOX LICENSE ---------
 // Copyright (C) 2016-2022 Runbox Solutions AS (runbox.com).
-// 
+//
 // This file is part of Runbox 7.
-// 
+//
 // Runbox 7 is free software: You can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// 
+//
 // Runbox 7 is distributed in the hope that it will be useful, but
 // WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 // General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Runbox 7. If not, see <https://www.gnu.org/licenses/>.
 // ---------- END RUNBOX LICENSE ----------
 
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { RunboxWebmailAPI, FolderListEntry } from '../rmmapi/rbwebmail';
-import { FromAddress } from '../rmmapi/from_address';
+import { RunboxWebmailAPI } from '../rmmapi/rbwebmail';
+import { FolderListEntry } from '../common/folderlistentry';
 import { MessageInfo } from '../common/messageinfo';
 import { MailAddressInfo } from '../common/mailaddressinfo';
 import { MessageListService } from '../rmmapi/messagelist.service';
-import { RMM } from '../rmm';
+import { MessageTableRowTool} from '../messagetable/messagetablerow';
+import { Identity, ProfileService } from '../profiles/profile.service';
 import { from, of, BehaviorSubject } from 'rxjs';
 import { map, mergeMap, bufferCount, take, distinctUntilChanged } from 'rxjs/operators';
+
+import moment from 'moment';
+import 'moment-timezone';
+import { objectEqualWithKeys } from '../common/util';
 
 export class ForwardedAttachment {
     constructor(
@@ -44,13 +49,14 @@ export class DraftFormModel {
 
     from: string = null;
     mid: number = (DraftFormModel.newDraftCount--);
+    tid: number = null;
     to: MailAddressInfo[] = [];
     cc: MailAddressInfo[] = [];
     bcc: MailAddressInfo[] = [];
     reply_to: string = null;
     subject: string = null;
     msg_body = '';
-    html: string;
+    html = '';
     preview: string;
     in_reply_to: string;
     reply_to_id: string = null;
@@ -62,7 +68,7 @@ export class DraftFormModel {
     message_date = null;
 
     public static create(draftId: number,
-                         fromAddress: FromAddress,
+                         fromAddress: Identity,
                          to: string, subject: string,
                          preview?: string,
                          message_date?: Date): DraftFormModel {
@@ -81,7 +87,7 @@ export class DraftFormModel {
         return ret;
     }
 
-    public static reply(mailObj, froms: FromAddress[], all: boolean, useHTML: boolean): DraftFormModel {
+    public static reply(mailObj, froms: Identity[], all: boolean, useHTML: boolean): DraftFormModel {
         const ret = new DraftFormModel();
         ret.reply_to_id = mailObj.mid;
         ret.in_reply_to = mailObj.headers['message-id'];
@@ -102,7 +108,8 @@ export class DraftFormModel {
         }
 
         // If all, also add all the other To/CC folks:
-        if (all) {
+        // Guard: sometimes mailObj.to is not an array!?
+        if (all && mailObj.to && Array.isArray(mailObj.to)) {
             ret.to = ret.to.concat(mailObj.to
                 .filter((addr) =>
                     froms.find(fromObj => fromObj.email === addr.address) ? false : true
@@ -122,25 +129,27 @@ export class DraftFormModel {
         ret.setFromForResponse(mailObj, froms);
         ret.setSubjectForResponse(mailObj, 'Re: ');
 
-        let mailDate: Date = mailObj.date;
-        const timezoneOffset: number = mailDate.getTimezoneOffset();
-
-        mailDate = new Date(mailDate.getTime() - timezoneOffset * 60 * 1000);
-        const timezoneOffsetString: string = 'GMT' + (timezoneOffset <= 0 ? '+' : '-') +
-            ('' + (100 + (Math.abs(timezoneOffset) / 60))).substr(1, 2) + ':' +
-            ('' + (100 + (Math.abs(timezoneOffset) % 60))).substr(1, 2);
+        const localTZ = moment.tz.guess();
+        const replyHeaderHTML = 'On '
+            + moment(mailObj.date, localTZ).format('yyyy-MM-DD HH:mm Z')
+            + ' ' + moment.tz(localTZ).format('z')
+            + ', '
+            + (mailObj.from[0].name
+                ? `"${mailObj.from[0].name}" &lt;${mailObj.from[0].address}&gt; wrote:`
+                : `${mailObj.from[0].address} wrote:`);
 
         if (!useHTML && mailObj.rawtext) {
-            ret.msg_body = '\n' + mailDate.toISOString().substr(0, 'yyyy-MM-ddTHH:mm'.length).replace('T', ' ') + ' ' +
-                timezoneOffsetString + ' ' + sender[0].nameAndAddress + ':\n' +
-                mailObj.rawtext.split('\n').map((line) => line.indexOf('>') === 0 ? '>' + line : '> ' + line).join('\n');
+            var replyHeaderText = replyHeaderHTML.replaceAll('&lt;', '<');
+            replyHeaderText = replyHeaderText.replaceAll('&gt;', '>');
+            ret.msg_body = '\n' + replyHeaderText + '\n'
+          + mailObj.rawtext.split('\n').map((line) => line.indexOf('>') === 0 ? '>' + line : '> ' + line).join('\n');
         } else if (!useHTML && !mailObj.rawtext) {
             ret.msg_body = '';
         } else {
             ret.html =
                 `<br /><div style="padding-left: 10px; border-left: black solid 1px">
                     <hr style="width: 100%" />
-                    ${mailObj.origReplyHeaderHTML}<br />
+                    ${replyHeaderHTML}<br />
                     ${mailObj.sanitized_html}
                 </div>`;
             ret.useHTML = true;
@@ -149,28 +158,47 @@ export class DraftFormModel {
     }
 
     public static trimmedPreview(preview: string): string {
-        let ret = preview.substring(0, DraftFormModel.MAX_DRAFT_PREVIEW_LENGTH);
+        let ret = (preview ?? '').substring(0, DraftFormModel.MAX_DRAFT_PREVIEW_LENGTH);
         if (ret.length === DraftFormModel.MAX_DRAFT_PREVIEW_LENGTH) {
             ret += '...';
         }
         return ret;
     }
 
-    public static forward(mailObj, froms: FromAddress[], useHTML: boolean): DraftFormModel {
+    public static forward(mailObj, froms: Identity[], useHTML: boolean): DraftFormModel {
         const ret = new DraftFormModel();
         ret.setFromForResponse(mailObj, froms);
 
+        const fwdFromNameStr = mailObj.from[0].name
+            ? `"${mailObj.from[0].name}" &lt;${mailObj.from[0].address}&gt;`
+            : `${mailObj.from[0].address}`;
+        const localTZ = moment.tz.guess();
+        const fwdDateStr = moment(mailObj.date, localTZ).local().format('yyyy-MM-DD HH:mm Z ') + moment.tz(localTZ).format('z');
+        const fwdSubjectStr = `Subject: ${mailObj.subject}`;
+        const fwdTo = mailObj.to ? mailObj.to.map((to) => `"${to.name}" &lt;${to.address}&gt;`) : [];
+        const fwdCC = mailObj.cc ? mailObj.cc.map((cc) => `"${cc.name}" &lt;${cc.address}&gt;`) : [];
+        const fwdHeaderHTML = `From: ${fwdFromNameStr} <br />
+Time: ${fwdDateStr} <br />
+${fwdSubjectStr} <br />`
+            + (fwdTo.length > 0 ? `
+<span>To: <span>` + fwdTo.join('</span><span>') + '</span></span> <br />' : '')
+            + (fwdCC.length > 0 ? `
+<span>CC: <span>` + fwdCC.join('</span><span>') + '</span></span> <br />' : '');
         ret.setSubjectForResponse(mailObj, 'Fwd: ');
         if (!useHTML) {
+            var fwdHeaderText = fwdHeaderHTML.replaceAll(' <br />', '');
+            var fwdHeaderText = fwdHeaderText.replaceAll(/<\/?span>/g, '');
+            var fwdHeaderText = fwdHeaderText.replaceAll('&lt;', '<');
+            var fwdHeaderText = fwdHeaderText.replaceAll('&gt;', '>');
             ret.msg_body = '\n\n----------------------------------------------\nForwarded message:\n' +
-                mailObj.origMailHeaderText + '\n\n' + mailObj.rawtext;
+                fwdHeaderText + '\n\n\n' + mailObj.rawtext;
         } else {
             ret.html =
                 `<br />
-                <hr style="width: 100%" />
-                ---------- Forwarded message ----------<br />
-                ${mailObj.origMailHeaderHTML}<br />
-                ${mailObj.sanitized_html}`;
+<hr style="width: 100%" />
+---------- Forwarded message ----------<br />
+${fwdHeaderHTML}<br />
+${mailObj.sanitized_html}`;
             ret.useHTML = true;
         }
         ret.attachments = mailObj.attachments.map((attachment, ndx) =>
@@ -186,12 +214,16 @@ export class DraftFormModel {
         return false;
     }
 
-    private setFromForResponse(mailObj, froms: FromAddress[]): void {
-        this.from = (
-            [].concat(mailObj.to || []).concat(mailObj.cc || []).find(
-                addr => froms.find(fromObj => fromObj.email === addr.address.toLowerCase())
-            ) || { address: froms[0].email }
-        ).address.toLowerCase();
+    private setFromForResponse(mailObj, froms: Identity[]): void {
+        if (froms.length > 0) {
+            this.from = (
+                [].concat(mailObj.to || []).concat(mailObj.cc || []).find(
+                    addr => froms.find(fromObj => fromObj.email === addr.address.toLowerCase())
+                ) || { address: froms[0].email }
+            ).address.toLowerCase();
+        } else {
+            console.error('DraftDesk: No froms passed to setFromForResponse');
+        }
     }
 
     private setSubjectForResponse(mailObj, prefix): void {
@@ -202,26 +234,36 @@ export class DraftFormModel {
 @Injectable()
 export class DraftDeskService {
     draftModels: BehaviorSubject<DraftFormModel[]> = new BehaviorSubject([]);
-    fromsSubject: BehaviorSubject<FromAddress[]> = new BehaviorSubject([]);
+    fromsSubject: BehaviorSubject<Identity[]> = new BehaviorSubject([]);
     isEditing = -1;
     composingNewDraft: DraftFormModel;
     shouldReturnToPreviousPage = false;
 
     constructor(public rmmapi: RunboxWebmailAPI,
                 private messagelistservice: MessageListService,
-                private http: HttpClient,
-                private rmm: RMM) {
-        this.rmm.profile.profiles.subscribe((_) =>
-            this.refreshFroms());
+                private profileService: ProfileService,
+                private http: HttpClient
+               ) {
+        this.profileService.validProfiles.subscribe((profiles) => {
+            this.fromsSubject.next(profiles);
+        });
+
+        // Recreate drafts when froms(identities) change
+        this.fromsSubject
+            .subscribe(froms => {
+                if (froms.length > 0) {
+                    this.refreshDrafts();
+                }
+            });
 
         this.messagelistservice.refreshFolderList();
         this.messagelistservice.folderListSubject
             .pipe(distinctUntilChanged((prev: FolderListEntry[], curr: FolderListEntry[]) => {
                 return prev.length === curr.length
                     && prev.every((f, index) =>
-                        f.folderId === curr[index].folderId
-                        && f.totalMessages === curr[index].totalMessages
-                        && f.newMessages === curr[index].newMessages);
+                        objectEqualWithKeys(f, curr[index], [
+                            'folderId', 'totalMessages', 'newMessages'
+                        ]))
             }))
             .subscribe((folders) => {
                 this.refreshDrafts();
@@ -229,80 +271,71 @@ export class DraftDeskService {
     }
 
     // default identity for creating an email
-    public mainIdentity(): FromAddress {
-        return this.fromsSubject.value[0];
-    }
-
-    public refreshFroms() {
-        this.rmmapi.getFromAddress().pipe(
-            map((froms) => {
-                froms.sort((a, b) => {
-                    if (a.type === 'main') {
-                        return -1;
-                    } else if (b.type === 'main') {
-                        return 1;
-                    } else if (a.type === 'aliases') {
-                        return -1;
-                    } else if (b.type === 'aliases') {
-                        return 1;
-                    } else {
-                        return 0;
-                    }
-                });
-                froms.sort((a, b) => {
-                    return a.priority - b.priority;
-                });
-                return froms;
-            })).subscribe(
-                froms => this.fromsSubject.next(froms),
-                err => {
-                    console.error(err);
-                }
-            );
+    public mainIdentity(): Identity {
+        return this.profileService.composeProfile;
     }
 
     private refreshDrafts() {
-        this.refreshFroms();
-        this.fromsSubject
-            .subscribe(froms => {
-                if (froms.length > 0) {
-                    // Only update if drafts actually changed
-                    this.rmmapi.listAllMessages(0, 0, 0, 100, true, 'Drafts')
-                    .pipe(distinctUntilChanged((prev: any[], curr: any[]) => {
-                        return prev.length === curr.length
-                            && prev.every((m, index) =>
-                                m.id === curr[index].id);
-                    }))
-                    .subscribe(messages => {
-                        // need to keep any in-progress drafts!
-                        const newDrafts = [];
-                        messages.map((msgInfo) =>
-                            newDrafts.push(
-                                DraftFormModel.create(
-                                    msgInfo.id,
-                                    froms[0],
-                                    msgInfo.to.map((addr) => addr.name === null || addr.address.indexOf(addr.name + '@') === 0 ?
-                                        addr.address : addr.name + '<' + addr.address + '>').join(','),
-                                    msgInfo.subject, null, msgInfo.messageDate)
-                            )
-                        );
-                        if (this.composingNewDraft) {
-                            newDrafts.splice(0, 0, this.composingNewDraft);
-                        }
-                        this.draftModels.next(newDrafts);
-                    });
-            }
-        },
-                                    err => {
-                                        console.log(err);
-                                    }
-        );
+        if (this.fromsSubject.value.length > 0) {
+            this.rmmapi.listAllMessages(0, 0, 0, 100, true, 'Drafts')
+                .pipe(distinctUntilChanged((prev: any[], curr: any[]) => {
+                    return prev.length === curr.length
+                        && prev.every((m, index) =>
+                            m.id === curr[index].id);
+                }))
+                .subscribe(messages => {
+                    // need to keep any in-progress drafts!
+                    const newDrafts = [];
+                    messages.map((msgInfo) =>
+                        newDrafts.push(
+                            DraftFormModel.create(
+                                msgInfo.id,
+                                this.mainIdentity(),
+                                msgInfo.to.map((addr) => addr.name === null || addr.address.indexOf(addr.name + '@') === 0 ?
+                                    addr.address : addr.name + '<' + addr.address + '>').join(','),
+                                msgInfo.subject, null, msgInfo.messageDate)
+                        )
+                                );
+                    if (this.composingNewDraft) {
+                        newDrafts.splice(0, 0, this.composingNewDraft);
+                    }
+                    this.draftModels.next(newDrafts);
+                });
+        }
     }
 
     public deleteDraft(messageId: number) {
         let models = this.draftModels.value;
         models = models.filter(dm => dm.mid !== messageId);
         this.draftModels.next(models);
+    }
+
+    public async newTemplateDraft(
+        messageId: number,
+    ) {
+
+        this.rmmapi.getMessageContents(messageId).subscribe((contents) => {
+            const res: any = Object.assign({}, contents);
+            const {subject} = res.headers
+            let { to } = res.headers
+
+            if (to) {
+                to = new MailAddressInfo(to.value.name, to.value.address).nameAndAddress;
+            }
+
+            const draftFormModel = DraftFormModel.create(
+                -1,
+                this.mainIdentity(),
+                to,
+                subject
+            )
+
+            draftFormModel.tid = messageId;
+            draftFormModel.msg_body = contents.text.text;
+            draftFormModel.html = contents.text.html;
+
+            return this.newDraft(draftFormModel);
+        })
     }
 
     public async newBugReport(
@@ -315,7 +348,7 @@ export class DraftDeskService {
     ) {
         const draftObj = DraftFormModel.create(
             -1,
-            this.fromsSubject.value[0],
+            this.mainIdentity(),
             '"Runbox 7 Bug Reports" <bugs@runbox.com>',
             'Runbox 7 Bug Report'
         );
@@ -352,7 +385,7 @@ export class DraftDeskService {
                                              {responseType: 'text'}).toPromise();
         const draftObj = DraftFormModel.create(
             -1,
-            this.fromsSubject.value[0],
+            this.mainIdentity(),
             to,
             "Let's have a video call"
         );
@@ -364,6 +397,10 @@ export class DraftDeskService {
     public newDraft(model: DraftFormModel): Promise<void> {
         return new Promise((resolve, _) => {
             const afterPrepare = () => {
+                if (model.attachments && model.attachments.length > 0 ) {
+                    model.attachments.forEach((att) =>
+                        att.sizeDisplay = MessageTableRowTool.formatBytes(att.size, 2));
+                }
                 this.composingNewDraft = model;
                 // const drafts = this.draftModels.value;
                 // drafts.splice(0, 0, this.composingNewDraft);
@@ -380,7 +417,6 @@ export class DraftDeskService {
                                 .pipe(
                                     map(ret => {
                                         ret.file = ret.filename;
-
                                         model.attachments[ndx] = ret;
                                         if (model.useHTML && att.contentId) {
                                             const draftUrl = `/ajax/download_draft_attachment?filename=${ret.filename}`;
